@@ -1,7 +1,11 @@
 // app/views/scanner.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import {
+  CameraView,
+  useCameraPermissions,
+  type BarcodeScanningResult,
+} from "expo-camera";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -17,22 +21,43 @@ export default function Scanner() {
   const [permission, requestPermission] = useCameraPermissions();
   const navigation = useNavigation();
   const [backBusy, setBackBusy] = useState(false);
-  const backTimer = useRef<NodeJS.Timeout | null>(null);
+  const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [scanningLocked, setScanningLocked] = useState(false);
 
   useEffect(() => {
-    if (!permission) requestPermission();
-    return () => backTimer.current && clearTimeout(backTimer.current);
-  }, [permission]);
+    if (!permission) {
+      requestPermission();
+    }
+    return () => {
+      if (backTimer.current) clearTimeout(backTimer.current);
+    };
+  }, [permission, requestPermission]);
 
   const handleBack = () => {
     if (backBusy) return;
     setBackBusy(true);
+
     if (navigation.canGoBack()) {
       navigation.goBack();
     } else {
       router.replace("/");
     }
+
     backTimer.current = setTimeout(() => setBackBusy(false), 400);
+  };
+
+  const handleBarcodeScanned = ({ data }: BarcodeScanningResult) => {
+    if (scanningLocked) return;
+    setScanningLocked(true);
+
+    // Navigate to confirm screen with the scanned QR data
+    router.push(
+      `/views/confirmTicket?code=${encodeURIComponent(String(data ?? ""))}`
+    );
+
+    // Small lock to prevent multiple triggers from the same QR
+    setTimeout(() => setScanningLocked(false), 1500);
   };
 
   if (!permission) {
@@ -62,7 +87,10 @@ export default function Scanner() {
           onPress={handleBack}
           hitSlop={12}
           disabled={backBusy}
-          style={({ pressed }) => [styles.iconBtn, pressed && { backgroundColor: "#F2F3F7" }]}
+          style={({ pressed }) => [
+            styles.iconBtn,
+            pressed && { backgroundColor: "#F2F3F7" },
+          ]}
         >
           <Ionicons name="arrow-back" size={22} color="#071689" />
         </Pressable>
@@ -77,13 +105,19 @@ export default function Scanner() {
           <CameraView
             style={StyleSheet.absoluteFillObject}
             facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ["qr", "ean13", "code128"] }}
-            onBarcodeScanned={() => {}}
+            barcodeScannerSettings={{
+              // QR-only scanner
+              barcodeTypes: ["qr"],
+            }}
+            onBarcodeScanned={handleBarcodeScanned}
           />
         </View>
 
         <Pressable
-          style={({ pressed }) => [styles.primaryBtn, pressed && { backgroundColor: "#06126E" }]}
+          style={({ pressed }) => [
+            styles.primaryBtn,
+            pressed && { backgroundColor: "#06126E" },
+          ]}
           onPress={() => router.push("/views/confirmTicket")}
         >
           <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
@@ -121,7 +155,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#E5E7EB",
   },
 
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 18, alignItems: "center" },
+  content: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    alignItems: "center",
+  },
 
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
