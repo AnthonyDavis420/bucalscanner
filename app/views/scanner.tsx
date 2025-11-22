@@ -113,6 +113,7 @@ export default function Scanner() {
           />
         </View>
 
+        {/* Original Button: Goes to standard confirm view */}
         <Pressable
           style={({ pressed }) => [
             styles.primaryBtn,
@@ -122,6 +123,22 @@ export default function Scanner() {
         >
           <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
           <Text style={styles.primaryBtnText}>Go to Confirm</Text>
+        </Pressable>
+
+        {/* New Test Button: Forces the "Redeemed/Success" view */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.secondaryBtn,
+            pressed && { backgroundColor: "#F3F4F6" },
+          ]}
+          onPress={() =>
+            router.push(
+              "/views/confirmTicket?status=redeemed&code=VOUCHER-TEST&holderName=Jane+Doe"
+            )
+          }
+        >
+          <Ionicons name="ticket-outline" size={18} color="#071689" />
+          <Text style={styles.secondaryBtnText}>Test Voucher Claim</Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -175,12 +192,29 @@ const styles = StyleSheet.create({
 
   primaryBtn: {
     flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    width: "100%",
+    paddingVertical: 14,
     backgroundColor: "#071689",
     borderRadius: 10,
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 12,
   },
   primaryBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+
+  // New Secondary Button Styles
+  secondaryBtn: {
+    flexDirection: "row",
+    width: "100%",
+    paddingVertical: 14,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#071689",
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  secondaryBtnText: { color: "#071689", fontSize: 16, fontWeight: "700" },
 });

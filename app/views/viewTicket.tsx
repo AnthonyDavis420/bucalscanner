@@ -2,7 +2,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
-import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
+import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import QRCode from "react-native-qrcode-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 type TicketStatus = "active" | "redeemed" | "invalid" | "expired";
@@ -40,7 +41,6 @@ export default function ViewTicket() {
 
   const handleRedeem = () => setStatus("redeemed");
   const handleInvalidate = () => setStatus("invalid");
-  const handleReactivate = () => setStatus("active");
   const handleBack = () => router.back();
 
   return (
@@ -57,72 +57,79 @@ export default function ViewTicket() {
         <View style={{ width: 22 }} />
       </View>
 
-      <View style={styles.content}>
-        <BarcodePlaceholder value={code} />
+      <ScrollView 
+        style={{ flex: 1 }} 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View>
+          <TicketQRCode value={code} status={status} />
 
-        <View style={styles.meta}>
-          <MetaRow label="Event" value={eventName} />
-          <MetaRow label="Name" value={holderName} />
-          <MetaRow label="Side" value={side} />
-          <MetaRow label="Ticket ID" value={ticketId} />
-          <MetaRow
-            label="Status"
-            value={status.charAt(0).toUpperCase() + status.slice(1)}
-          />
+          <View style={styles.meta}>
+            <MetaRow label="Event" value={eventName} />
+            <MetaRow label="Name" value={holderName} />
+            <MetaRow label="Side" value={side} />
+            <MetaRow label="Ticket ID" value={ticketId} />
+            <MetaRow
+              label="Status"
+              value={status.charAt(0).toUpperCase() + status.slice(1)}
+            />
+          </View>
         </View>
 
-        {/* Actions */}
-        {status === "active" && (
-          <View style={styles.row}>
-            <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
-              <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleRedeem}
-              style={[styles.cta, { backgroundColor: "#071689" }]}
-            >
-              <Text style={styles.ctaText}>Redeem</Text>
-            </Pressable>
-          </View>
-        )}
+        {/* Actions Area */}
+        <View style={styles.actionsContainer}>
+          {status === "active" && (
+            <View style={styles.row}>
+              <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
+                <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleRedeem}
+                style={[styles.cta, { backgroundColor: "#071689" }]}
+              >
+                <Text style={styles.ctaText}>Redeem</Text>
+              </Pressable>
+            </View>
+          )}
 
-        {status === "invalid" && (
-          <View style={styles.row}>
-            <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
-              <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleRedeem}
-              style={[styles.cta, { backgroundColor: "#071689" }]}
-            >
-              <Text style={styles.ctaText}>Redeem</Text>
-            </Pressable>
-          </View>
-        )}
+          {status === "invalid" && (
+            <View style={styles.row}>
+              <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
+                <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleRedeem}
+                style={[styles.cta, { backgroundColor: "#071689" }]}
+              >
+                <Text style={styles.ctaText}>Redeem</Text>
+              </Pressable>
+            </View>
+          )}
 
-        {status === "redeemed" && (
-          <View style={styles.row}>
-            {/* Left: Back, Right: Invalid */}
-            <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
-              <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleInvalidate}
-              style={[styles.cta, { backgroundColor: "#E53935" }]}
-            >
-              <Text style={styles.ctaText}>Invalid</Text>
-            </Pressable>
-          </View>
-        )}
+          {status === "redeemed" && (
+            <View style={styles.row}>
+              <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
+                <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleInvalidate}
+                style={[styles.cta, { backgroundColor: "#E53935" }]}
+              >
+                <Text style={styles.ctaText}>Invalid</Text>
+              </Pressable>
+            </View>
+          )}
 
-        {status === "expired" && (
-          <View style={styles.row}>
-            <Pressable onPress={handleBack} style={[styles.cta, styles.ghost, { flex: 1 }]}>
-              <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
-            </Pressable>
-          </View>
-        )}
-      </View>
+          {status === "expired" && (
+            <View style={styles.row}>
+              <Pressable onPress={handleBack} style={[styles.cta, styles.ghost, { flex: 1 }]}>
+                <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -138,44 +145,16 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function BarcodePlaceholder({ value }: { value: string }) {
-  const maxWidth = Math.min(Dimensions.get("window").width - 48, 420);
-  const height = 90;
-
-  const bars = React.useMemo(() => {
-    const arr: { w: number; isBar: boolean }[] = [];
-    let isBar = true;
-    let seed = 0;
-    for (let i = 0; i < value.length; i++) seed += value.charCodeAt(i);
-    for (let i = 0; i < 60; i++) {
-      seed = (seed * 9301 + 49297) % 233280;
-      const w = 2 + (seed % 5);
-      arr.push({ w, isBar });
-      isBar = !isBar;
-    }
-    return arr;
-  }, [value]);
-
-  const totalUnits = bars.reduce((s, b) => s + b.w, 0);
-  const unit = maxWidth / totalUnits;
+function TicketQRCode({ value, status }: { value: string; status: TicketStatus }) {
+  const size = Math.min(Dimensions.get("window").width - 120, 200);
+  const opacity = status === "active" ? 1.0 : 0.3; 
 
   return (
-    <View style={styles.barcodeWrap}>
-      <View style={[styles.barcodeBox, { width: maxWidth, height }]}>
-        <View style={{ flexDirection: "row", height: "100%" }}>
-          {bars.map((b, idx) => (
-            <View
-              key={idx}
-              style={{
-                width: Math.max(1, Math.round(b.w * unit)),
-                height: "100%",
-                backgroundColor: b.isBar ? "#111" : "transparent",
-              }}
-            />
-          ))}
-        </View>
+    <View style={styles.qrWrap}>
+      <View style={[styles.qrBox, { opacity }]}>
+        <QRCode value={value} size={size} />
       </View>
-      <Text style={styles.barcodeCode}>{value}</Text>
+      <Text style={styles.codeText}>{value}</Text>
     </View>
   );
 }
@@ -192,23 +171,50 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#ECECEC",
+    backgroundColor: "#fff",
+    zIndex: 10,
   },
   iconBtn: { padding: 6, borderRadius: 8 },
   title: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "800" },
 
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
-
-  barcodeWrap: { alignItems: "center", marginBottom: 24 },
-  barcodeBox: {
-    marginTop: 60,
-    marginBottom: 30,
-    borderRadius: 6,
-    overflow: "hidden",
-    backgroundColor: "#fff",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E5E7EB",
+  scrollContent: {
+    flexGrow: 1, 
+    paddingHorizontal: 16, 
+    paddingTop: 16,
+    paddingBottom: 24,
+    // REMOVED: justifyContent: 'space-between'
   },
-  barcodeCode: { marginTop: 8, fontSize: 12, color: "#333" },
+  
+  // This controls the gap above the buttons
+  actionsContainer: {
+    marginTop: 40, 
+  },
+
+  qrWrap: { 
+    alignItems: "center", 
+    marginTop: 24,
+    marginBottom: 24
+  },
+  qrBox: {
+    padding: 16,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "#F3F4F6",
+  },
+  codeText: { 
+    marginTop: 12, 
+    fontSize: 13, 
+    color: "#6B7280", 
+    fontFamily: "Courier New", 
+    fontWeight: "600",
+    letterSpacing: 1
+  },
 
   meta: { gap: 10 },
   metaRow: { flexDirection: "row", gap: 6 },
@@ -218,12 +224,8 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     gap: 12,
-    marginTop: 25,
-    marginBottom: 24,
-    paddingHorizontal: 8,
   },
   cta: {
-    marginTop: 50,
     height: 52,
     borderRadius: 10,
     alignItems: "center",
