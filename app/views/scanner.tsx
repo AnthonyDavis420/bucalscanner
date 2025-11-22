@@ -1,4 +1,3 @@
-// app/views/scanner.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -51,7 +50,8 @@ export default function Scanner() {
     if (scanningLocked) return;
     setScanningLocked(true);
 
-    // Navigate to confirm screen with the scanned QR data
+    // Logic to detect if it's a voucher or a ticket based on string pattern could go here.
+    // For now, default to ticket confirmation:
     router.push(
       `/views/confirmTicket?code=${encodeURIComponent(String(data ?? ""))}`
     );
@@ -113,7 +113,7 @@ export default function Scanner() {
           />
         </View>
 
-        {/* Original Button: Goes to standard confirm view */}
+        {/* Standard Ticket Manual Confirm */}
         <Pressable
           style={({ pressed }) => [
             styles.primaryBtn,
@@ -122,19 +122,25 @@ export default function Scanner() {
           onPress={() => router.push("/views/confirmTicket")}
         >
           <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-          <Text style={styles.primaryBtnText}>Go to Confirm</Text>
+          <Text style={styles.primaryBtnText}>Go to Confirm Ticket</Text>
         </Pressable>
 
-        {/* New Test Button: Forces the "Redeemed/Success" view */}
+        {/* Updated Test Voucher Button */}
         <Pressable
           style={({ pressed }) => [
             styles.secondaryBtn,
             pressed && { backgroundColor: "#F3F4F6" },
           ]}
           onPress={() =>
-            router.push(
-              "/views/confirmTicket?status=redeemed&code=VOUCHER-TEST&holderName=Jane+Doe"
-            )
+            router.push({
+              pathname: "/views/confirmVoucher",
+              params: {
+                voucherName: "VIP Box - Final Game",
+                issuer: "ADNU Alumni",
+                maxPax: "8", // Testing the limit logic
+                voucherCode: "TEST-VOU-001",
+              },
+            })
           }
         >
           <Ionicons name="ticket-outline" size={18} color="#071689" />
@@ -203,7 +209,7 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 
-  // New Secondary Button Styles
+  // Secondary Button Styles
   secondaryBtn: {
     flexDirection: "row",
     width: "100%",
