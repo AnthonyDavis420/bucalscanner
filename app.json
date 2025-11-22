@@ -8,6 +8,9 @@
     "scheme": "bucalscanner",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "extra": {
+      "EXPO_PUBLIC_API_BASE_URL": "https://www.bucaltrack.org"
+    },
     "ios": {
       "supportsTablet": true
     },
@@ -21,7 +24,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/icon.png"
     },
     "plugins": [
       "expo-router",
@@ -41,7 +44,7 @@
       "expo-web-browser"
     ],
     "experiments": {
-      "typedRoutes": true,
+      "typedRoutes": true
     }
   }
 }

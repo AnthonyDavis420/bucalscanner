@@ -1,25 +1,20 @@
-// app/index.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Keyboard,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableWithoutFeedback,
-    View,
+  ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Platform,
+  Pressable, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { scannerApi } from "../lib/api";
+
+const STORAGE_KEYS = {
+  eventId: "bucalscanner.activeEventId",
+  seasonId: "bucalscanner.activeSeasonId",
+  eventName: "bucalscanner.activeEventName",
+};
 
 const BLUE = "#071689";
-const STORAGE_KEY = "bucalscanner.activeEventId";
 
 export default function Index() {
   const [eventId, setEventId] = useState("");
@@ -27,13 +22,22 @@ export default function Index() {
   const [restoring, setRestoring] = useState(true);
   const isValid = useMemo(() => eventId.trim().length > 0, [eventId]);
 
-  // Load remembered event ID (if any) but stay on this screen
+  // Load remembered eventId (supports legacy JSON string saved in the same key)
   useEffect(() => {
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(STORAGE_KEY);
-        if (saved && saved.trim()) {
-          setEventId(saved.trim()); // Pre-fill the input instead of redirecting
+        const saved = await AsyncStorage.getItem(STORAGE_KEYS.eventId);
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed?.eventCode || parsed?.eventId) {
+              setEventId((parsed.eventCode || parsed.eventId || "").trim());
+            } else {
+              setEventId(saved.trim());
+            }
+          } catch {
+            setEventId(saved.trim());
+          }
         }
       } finally {
         setRestoring(false);
@@ -48,13 +52,18 @@ export default function Index() {
       setLoading(true);
       const trimmed = eventId.trim();
 
-      // Front-end only: "validate" means non-empty; real validation comes later
-      await AsyncStorage.setItem(STORAGE_KEY, trimmed);
+      const res = await scannerApi.resolveEvent(trimmed);
+      const { seasonId, eventId: resolvedEventId, name } = res.item;
 
-      // Navigate into the event scope
-      router.push("/views/welcome");
-    } catch (e) {
-      Alert.alert("Oops", "Something went wrong. Please try again.");
+      await AsyncStorage.multiSet([
+        [STORAGE_KEYS.eventId, resolvedEventId],
+        [STORAGE_KEYS.seasonId, seasonId || ""],
+        [STORAGE_KEYS.eventName, name || ""],
+      ]);
+
+      router.push("/views/scanner");
+    } catch (e: any) {
+      Alert.alert("Invalid Event", e?.message || "Event not found");
     } finally {
       setLoading(false);
     }
@@ -76,7 +85,7 @@ export default function Index() {
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.container}>
-            <View style={styles.headerBlock}>
+            <View className="headerBlock" style={styles.headerBlock}>
               <Text style={styles.welcome}>Welcome to</Text>
               <Text style={styles.brand}>BucalScanner!</Text>
             </View>
