@@ -1,9 +1,20 @@
+// app/index.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Platform,
-  Pressable, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi } from "../lib/api";
@@ -20,9 +31,10 @@ export default function Index() {
   const [eventId, setEventId] = useState("");
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(true);
+
   const isValid = useMemo(() => eventId.trim().length > 0, [eventId]);
 
-  // Load remembered eventId (supports legacy JSON string saved in the same key)
+  // Prefill from saved storage (supports legacy JSON string in same key)
   useEffect(() => {
     (async () => {
       try {
@@ -48,6 +60,7 @@ export default function Index() {
   const handleContinue = useCallback(async () => {
     Keyboard.dismiss();
     if (!isValid || loading) return;
+
     try {
       setLoading(true);
       const trimmed = eventId.trim();
@@ -57,11 +70,11 @@ export default function Index() {
 
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.eventId, resolvedEventId],
-        [STORAGE_KEYS.seasonId, seasonId || ""],
-        [STORAGE_KEYS.eventName, name || ""],
+        [STORAGE_KEYS.seasonId, seasonId],
+        [STORAGE_KEYS.eventName, name ?? ""],
       ]);
 
-      router.push("/views/scanner");
+      router.push("/views/welcome");
     } catch (e: any) {
       Alert.alert("Invalid Event", e?.message || "Event not found");
     } finally {
@@ -85,7 +98,7 @@ export default function Index() {
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.container}>
-            <View className="headerBlock" style={styles.headerBlock}>
+            <View style={styles.headerBlock}>
               <Text style={styles.welcome}>Welcome to</Text>
               <Text style={styles.brand}>BucalScanner!</Text>
             </View>
@@ -102,13 +115,14 @@ export default function Index() {
               <TextInput
                 value={eventId}
                 onChangeText={setEventId}
-                placeholder="e.g., EVT-2025-OPENING"
+                placeholder="e.g., YDPUEX"
                 placeholderTextColor="#999"
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={styles.input}
                 returnKeyType="done"
                 onSubmitEditing={handleContinue}
+                autoFocus
               />
 
               <Pressable

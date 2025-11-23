@@ -1,75 +1,75 @@
-// app/views/createTicket.tsx
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { router, Stack, useLocalSearchParams, useNavigation } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    Image,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableWithoutFeedback,
-    View,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { scannerApi, type EventDetails } from "../../lib/api";
+
+const STORAGE_KEYS = {
+  eventId: "bucalscanner.activeEventId",
+  seasonId: "bucalscanner.activeSeasonId",
+  eventName: "bucalscanner.activeEventName",
+};
 
 type TicketForm = {
   fullName: string;
   age: string;
   number: string;
   section?: string;
-  side?: "A" | "B";
+  side?: string;
   price: number;
   isPWD: boolean;
   isChild: boolean;
+  teamId?: string | null;
+  teamName?: string | null;
 };
 
-const OPTIONS = [
-  { label: "Courtside – Team A", section: "Courtside", side: "A", price: 100 },
-  { label: "Courtside – Team B", section: "Courtside", side: "B", price: 100 },
-  { label: "Bleachers – Team A", section: "Bleachers", side: "A", price: 40 },
-  { label: "Bleachers – Team B", section: "Bleachers", side: "B", price: 40 },
-];
+type SeatOption = {
+  label: string;
+  section: string;
+  side: string;
+  price: number;
+  teamId?: string | null;
+  teamName?: string | null;
+};
 
 export default function CreateTicket() {
-  const navigation = useNavigation();
-
+  const [backDisabled, setBackDisabled] = useState(false);
   useFocusEffect(
     useCallback(() => {
-      const tabsNamed = navigation.getParent?.("mainViews");
-      if (tabsNamed && tabsNamed.setOptions) {
-        tabsNamed.setOptions({ tabBarStyle: { display: "none" } });
-        return () => tabsNamed.setOptions({ tabBarStyle: undefined });
-      }
-      const parent = navigation.getParent?.();
-      const maybeTabs = (parent as any)?.getParent?.() ?? parent;
-      (maybeTabs as any)?.setOptions?.({ tabBarStyle: { display: "none" } });
-      return () => (maybeTabs as any)?.setOptions?.({ tabBarStyle: undefined });
-    }, [navigation])
+      const parent: any = (global as any).__navParentRef || null;
+      parent?.setOptions?.({ tabBarStyle: { display: "none" } });
+      return () => parent?.setOptions?.({ tabBarStyle: undefined });
+    }, [])
   );
 
-  const params = useLocalSearchParams<{
-    id?: string;
-    title?: string;
-    subtitle?: string;
-    dateTime?: string;
-    venue?: string;
-  }>();
+  const [activeIds, setActiveIds] = useState<{ eventId: string; seasonId: string }>({
+    eventId: "",
+    seasonId: "",
+  });
 
-  const id = params.id || "ev1";
-  const title = params.title || "NCF vs ADNU Game 2";
-  const subtitle = params.subtitle || "Basketball Senior Division Semi-finals";
-  const dateTime = params.dateTime || "5PM, July 28, 2025";
-  const venue = params.venue || "Ateneo de Naga University Gymnasium";
+  const [event, setEvent] = useState<EventDetails | null>(null);
+  const [loadingEvent, setLoadingEvent] = useState(true);
+  const [options, setOptions] = useState<SeatOption[]>([]);
 
-  const [adults, setAdults] = useState(1);
-  const [children, setChildren] = useState(0);
+  const [headerTitle, setHeaderTitle] = useState("Create Ticket");
+  const [headerSubtitle, setHeaderSubtitle] = useState("");
 
-  const maxChildrenForAdults = (a: number) => Math.min(5, Math.max(0, a + 2));
+  const [imgViewerVisible, setImgViewerVisible] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
   const mkAdult = (): TicketForm => ({
     fullName: "",
@@ -88,51 +88,93 @@ export default function CreateTicket() {
     isChild: true,
   });
 
+  const [adults] = useState(1);
+  const [children, setChildren] = useState(0);
   const [tickets, setTickets] = useState<TicketForm[]>([mkAdult()]);
   const [openDropdown, setOpenDropdown] = useState<number | "adults" | "children" | null>(null);
   const [isAdultsView, setIsAdultsView] = useState(true);
+  const [childIndex, setChildIndex] = useState(0);
 
-  // PWD warning modal
   const [warnVisible, setWarnVisible] = useState(false);
   const [pendingToggleIdx, setPendingToggleIdx] = useState<number | null>(null);
-
-  // Back confirm modal
   const [backWarnVisible, setBackWarnVisible] = useState(false);
-  const [backDisabled, setBackDisabled] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [savedEventId, savedSeasonId] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.eventId),
+          AsyncStorage.getItem(STORAGE_KEYS.seasonId),
+        ]);
+        const eventId = (savedEventId || "").trim();
+        const seasonId = (savedSeasonId || "").trim();
+        setActiveIds({ eventId, seasonId });
+        if (!eventId) {
+          setLoadingEvent(false);
+          return;
+        }
+
+        const res = await scannerApi.eventDetails(eventId, seasonId);
+        const details = res.item;
+        setEvent(details);
+
+        if (!seasonId && details.seasonId) {
+          const sid = String(details.seasonId);
+          setActiveIds({ eventId, seasonId: sid });
+          await AsyncStorage.setItem(STORAGE_KEYS.seasonId, sid);
+        }
+
+        setHeaderTitle(details.name || "Create Ticket");
+        setHeaderSubtitle(`${details.date || ""} • ${details.venue?.name || ""}`.trim());
+
+        const built: SeatOption[] = (details.seats || []).map((s: any) => {
+          const sectionName = s.sectionName ?? s.section ?? "";
+          const side =
+            s.teamSide ?? s.sideLabel ?? s.teamRef?.teamName ?? s.side ?? "";
+          const price =
+            typeof s.ticketPrice === "number"
+              ? s.ticketPrice
+              : typeof s.price === "number"
+              ? s.price
+              : 0;
+          return {
+            label: `${sectionName} – ${side}`,
+            section: sectionName,
+            side,
+            price,
+            teamId: s.teamRef?.teamId ?? null,
+            teamName: s.teamRef?.teamName ?? null,
+          };
+        });
+        setOptions(built);
+      } finally {
+        setLoadingEvent(false);
+      }
+    })();
+  }, []);
+
+  const maxChildrenForAdults = (a: number) => Math.min(5, Math.max(0, a + 2));
 
   const rebuildTickets = (adultCount: number, childCount: number) => {
-    const a = Math.max(1, Math.min(3, adultCount));
+    const a = 1;
     const c = Math.max(0, Math.min(maxChildrenForAdults(a), childCount));
-
     const existingAdults = tickets.filter((t) => !t.isChild);
     const existingChildren = tickets.filter((t) => t.isChild);
-
     const adultList: TicketForm[] = [];
     for (let i = 0; i < a; i++) {
       const base = existingAdults[i] ?? mkAdult();
       adultList.push({ ...base, isChild: false, isPWD: base.isPWD ?? false });
     }
-
     const childList: TicketForm[] = [];
     for (let i = 0; i < c; i++) {
       const base = existingChildren[i] ?? mkChild();
-      childList.push({ ...base, isChild: true, isPWD: base.isPWD ?? false });
+      childList.push({ ...base, isChild: true, price: 0, isPWD: base.isPWD ?? false });
     }
-
     const next = [...adultList, ...childList];
     setTickets(next);
     setOpenDropdown(null);
-
+    setChildIndex(0);
     if (c === 0) setIsAdultsView(true);
-  };
-
-  const setAdultsCount = (val: number) => {
-    const newAdults = Math.max(1, Math.min(3, val));
-    const childCap = maxChildrenForAdults(newAdults);
-    const newChildren = Math.min(children, childCap);
-    setAdults(newAdults);
-    setChildren(newChildren);
-    rebuildTickets(newAdults, newChildren);
   };
 
   const setChildrenCount = (val: number) => {
@@ -169,8 +211,15 @@ export default function CreateTicket() {
     updateTicket(idx, { number: digits });
   };
 
-  const onPickSection = (idx: number, opt: typeof OPTIONS[number]) => {
-    updateTicket(idx, { section: opt.section, side: opt.side, price: opt.price });
+  const onPickSection = (idx: number, opt: SeatOption) => {
+    const isChild = !!tickets[idx]?.isChild;
+    updateTicket(idx, {
+      section: opt.section,
+      side: opt.side,
+      price: isChild ? 0 : opt.price,
+      teamId: opt.teamId ?? null,
+      teamName: opt.teamName ?? null,
+    });
     setOpenDropdown(null);
   };
 
@@ -179,48 +228,16 @@ export default function CreateTicket() {
     [tickets]
   );
 
-  // Back button flow:
-  // 1) Close dropdown if open
-  // 2) Close PWD modal if open
-  // 3) Show back warning modal
-  const onBackPress = () => {
-    if (backDisabled) return;
-    if (openDropdown !== null) {
-      setOpenDropdown(null);
-      return;
-    }
-    if (warnVisible) {
-      setWarnVisible(false);
-      setPendingToggleIdx(null);
-      return;
-    }
-    setBackWarnVisible(true);
-  };
-
-  const confirmBack = () => {
-    setBackWarnVisible(false);
-    setBackDisabled(true);
-    const canGo = (navigation as any)?.canGoBack?.() ?? false;
-    if (canGo) {
-      (navigation as any).goBack();
-    } else {
-      router.replace("/");
-    }
-    setTimeout(() => setBackDisabled(false), 450);
-  };
-
-  const cancelBack = () => setBackWarnVisible(false);
-
-  const onProceed = () =>
-    router.push({
-      pathname: "/views/confirmPayment",
-      params: { tickets: JSON.stringify(tickets), subtotal: String(subtotal) },
-    });
-
   const adultTickets = tickets.filter((t) => !t.isChild);
   const childTickets = tickets.filter((t) => t.isChild);
-  const currentList = isAdultsView ? adultTickets : childTickets;
-  const current = currentList[0];
+
+  useEffect(() => {
+    if (!isAdultsView && childIndex >= childTickets.length && childTickets.length > 0) {
+      setChildIndex(0);
+    }
+  }, [isAdultsView, childIndex, childTickets.length]);
+
+  const current = isAdultsView ? adultTickets[0] : childTickets[childIndex];
 
   const ticketErrors = (t: TicketForm): string[] => {
     const errs: string[] = [];
@@ -237,25 +254,13 @@ export default function CreateTicket() {
     return errs;
   };
 
-  const anyInvalid = useMemo(
-    () => tickets.some((t) => ticketErrors(t).length > 0),
-    [tickets]
-  );
-
   useEffect(() => {
     if (tickets.length === 0) {
       setTickets([mkAdult()]);
-      setAdults(1);
       setChildren(0);
     }
   }, [tickets.length]);
 
-  const childChoices = Array.from(
-    { length: maxChildrenForAdults(adults) + 1 },
-    (_, i) => i
-  );
-
-  // PWD confirm modal flow
   const requestTogglePWD = (idx: number, nextVal: boolean) => {
     if (nextVal) {
       setPendingToggleIdx(idx);
@@ -278,12 +283,57 @@ export default function CreateTicket() {
     setPendingToggleIdx(null);
   };
 
+  const onBackPress = () => {
+    if (backDisabled) return;
+    if (openDropdown !== null) {
+      setOpenDropdown(null);
+      return;
+    }
+    if (warnVisible) {
+      setWarnVisible(false);
+      setPendingToggleIdx(null);
+      return;
+    }
+    setBackWarnVisible(true);
+  };
+
+  const confirmBack = () => {
+    setBackWarnVisible(false);
+    setBackDisabled(true);
+    router.replace("/views/welcome");
+    setTimeout(() => setBackDisabled(false), 450);
+  };
+
+  const cancelBack = () => setBackWarnVisible(false);
+
+  const onProceed = () =>
+    router.push({
+      pathname: "/views/confirmPayment",
+      params: {
+        tickets: JSON.stringify(tickets),
+        subtotal: String(subtotal),
+        eventId: activeIds.eventId,
+        seasonId: activeIds.seasonId,
+      },
+    });
+
+  const venueImageUri = useMemo(() => {
+    const v: any = event?.venue || null;
+    const url =
+      v?.imageUrl ||
+      v?.image_url ||
+      v?.img ||
+      (typeof v?.imagePath === "string" && v.imagePath.startsWith("http") ? v.imagePath : null);
+    return typeof url === "string" && url.startsWith("http")
+      ? url
+      : "https://via.placeholder.com/700x300.png?text=Seating+Map";
+  }, [event]);
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          {/* Header */}
           <View style={styles.headerRow}>
             <Pressable
               onPress={onBackPress}
@@ -294,62 +344,35 @@ export default function CreateTicket() {
               <Ionicons name="arrow-back" size={22} color="#071689" />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>Create Ticket</Text>
-              <Text style={styles.headerSubtitle}>{subtitle}</Text>
+              <Text style={styles.headerTitle}>{headerTitle}</Text>
+              {!!headerSubtitle && <Text style={styles.headerSubtitle}>{headerSubtitle}</Text>}
             </View>
             <View style={{ width: 22 }} />
           </View>
 
-          {/* Seating Map Card */}
-          <View style={styles.card}>
+          <Pressable style={styles.card} onPress={() => { setImgViewerVisible(true); setZoom(1); }}>
             <Image
-              source={{ uri: "https://via.placeholder.com/700x300.png?text=Seating+Map" }}
+              source={{ uri: venueImageUri }}
               style={styles.mapImage}
+              resizeMode="contain"
             />
-          </View>
+            <View style={styles.tapHint}>
+              <Ionicons name="expand" size={14} color="#fff" />
+              <Text style={styles.tapHintText}>Tap to zoom</Text>
+            </View>
+          </Pressable>
 
-          {/* Ticket Count Selection */}
           <View style={styles.ticketCountCard}>
             <Text style={styles.ticketCountTitle}>Number of Tickets</Text>
             <View style={styles.ticketCountRow}>
-              {/* Adults dropdown */}
               <View style={styles.ticketCountItem}>
                 <Text style={styles.ticketCountLabel}>Adults</Text>
-                <Pressable
-                  style={styles.selectBtn}
-                  onPress={() =>
-                    setOpenDropdown((prev) => (prev === "adults" ? null : "adults"))
-                  }
-                >
-                  <Text style={styles.selectText}>{adults}</Text>
-                  <Ionicons name="chevron-down" size={16} color="#222" />
-                </Pressable>
-                {openDropdown === "adults" && (
-                  <View style={styles.dropdownMenu}>
-                    {[1, 2, 3].map((n) => (
-                      <Pressable
-                        key={n}
-                        onPress={() => setAdultsCount(n)}
-                        style={[
-                          styles.optionItem,
-                          adults === n && styles.optionActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.optionText,
-                            adults === n && styles.optionTextActive,
-                          ]}
-                        >
-                          {n}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
+                <View style={[styles.selectBtn, { opacity: 0.6 }]}>
+                  <Text style={styles.selectText}>1</Text>
+                  <Ionicons name="chevron-down" size={16} color="#222" style={{ opacity: 0 }} />
+                </View>
               </View>
 
-              {/* Children dropdown */}
               <View style={styles.ticketCountItem}>
                 <Text style={styles.ticketCountLabel}>Children</Text>
                 <Pressable
@@ -363,39 +386,39 @@ export default function CreateTicket() {
                 </Pressable>
                 {openDropdown === "children" && (
                   <View style={styles.dropdownMenu}>
-                    {childChoices.map((n) => (
-                      <Pressable
-                        key={n}
-                        onPress={() => setChildrenCount(n)}
-                        style={[
-                          styles.optionItem,
-                          children === n && styles.optionActive,
-                        ]}
-                      >
-                        <Text
+                    {Array.from({ length: maxChildrenForAdults(adults) + 1 }, (_, i) => i).map(
+                      (n) => (
+                        <Pressable
+                          key={n}
+                          onPress={() => setChildrenCount(n)}
                           style={[
-                            styles.optionText,
-                            children === n && styles.optionTextActive,
+                            styles.optionItem,
+                            children === n && styles.optionActive,
                           ]}
                         >
-                          {n}
-                        </Text>
-                      </Pressable>
-                    ))}
+                          <Text
+                            style={[
+                              styles.optionText,
+                              children === n && styles.optionTextActive,
+                            ]}
+                          >
+                            {n}
+                          </Text>
+                        </Pressable>
+                      )
+                    )}
                   </View>
                 )}
               </View>
 
-              {/* Total */}
               <View style={styles.ticketCountItem}>
                 <Text style={styles.ticketCountLabel}>Total</Text>
-                <Text style={styles.ticketCountTotal}>{adults + children}</Text>
+                <Text style={styles.ticketCountTotal}>{1 + children}</Text>
               </View>
             </View>
-            <Text style={styles.ticketCountNote}>Maximum of 3 adult tickets per purchase</Text>
+            <Text style={styles.ticketCountNote}>Maximum of 3 child tickets per adult ticket</Text>
           </View>
 
-          {/* Adults / Children toggle */}
           {children > 0 && (
             <View style={styles.typeToggle}>
               <Pressable
@@ -407,7 +430,10 @@ export default function CreateTicket() {
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => setIsAdultsView(false)}
+                onPress={() => {
+                  setIsAdultsView(false);
+                  setChildIndex((idx) => (idx < childTickets.length ? idx : 0));
+                }}
                 style={[styles.typeBtn, !isAdultsView && styles.typeBtnActive]}
               >
                 <Text style={[styles.typeBtnText, !isAdultsView && styles.typeBtnTextActive]}>
@@ -417,15 +443,17 @@ export default function CreateTicket() {
             </View>
           )}
 
-          {/* Single Ticket Card */}
           <View style={styles.ticketCard}>
-            {current ? (
+            {!current ? (
+              <Text>No tickets selected.</Text>
+            ) : (
               <>
                 <Text style={styles.ticketTitle}>
-                  {current.isChild ? "Child Ticket" : "Adult Ticket"}
+                  {current.isChild
+                    ? `Child Ticket${childTickets.length > 1 ? ` (${childIndex + 1} of ${childTickets.length})` : ""}`
+                    : "Adult Ticket"}
                 </Text>
 
-                {/* Full Name + Age */}
                 <View style={styles.dualRow}>
                   <View style={styles.fullNameContainer}>
                     <Text style={styles.label}>Full Name</Text>
@@ -438,7 +466,7 @@ export default function CreateTicket() {
                     />
                   </View>
                   <View style={styles.ageBox}>
-                    <Text style={styles.label}>Age</Text>
+                    <Text style={styles.label}>Age{current.isChild ? " (1–12)" : ""}</Text>
                     <TextInput
                       value={current?.age || ""}
                       onChangeText={(v) => onChangeAge(tickets.indexOf(current), v)}
@@ -448,7 +476,6 @@ export default function CreateTicket() {
                   </View>
                 </View>
 
-                {/* Number (adults only) */}
                 {!current.isChild && (
                   <View>
                     <Text style={styles.label}>Number</Text>
@@ -461,11 +488,11 @@ export default function CreateTicket() {
                   </View>
                 )}
 
-                {/* Section */}
                 <View style={[styles.sectionFullWidth, { position: "relative" }]}>
                   <Text style={styles.label}>Section</Text>
                   <Pressable
                     style={styles.selectBtn}
+                    disabled={loadingEvent || options.length === 0}
                     onPress={() =>
                       setOpenDropdown((prev) =>
                         prev === tickets.indexOf(current) ? null : tickets.indexOf(current)
@@ -474,15 +501,19 @@ export default function CreateTicket() {
                   >
                     <Text style={styles.selectText}>
                       {current?.section && current?.side
-                        ? `${current.section} – Team ${current.side}`
-                        : "Select section"}
+                        ? `${current.section} – ${current.side}`
+                        : loadingEvent
+                        ? "Loading..."
+                        : options.length
+                        ? "Select section"
+                        : "No sections available"}
                     </Text>
                     <Ionicons name="chevron-down" size={16} color="#222" />
                   </Pressable>
 
-                  {openDropdown === tickets.indexOf(current) && (
+                  {openDropdown === tickets.indexOf(current) && options.length > 0 && (
                     <View style={styles.dropdownMenu}>
-                      {OPTIONS.map((opt, i) => {
+                      {options.map((opt, i) => {
                         const active =
                           current?.section === opt.section && current?.side === opt.side;
                         return (
@@ -493,6 +524,7 @@ export default function CreateTicket() {
                           >
                             <Text style={[styles.optionText, active && styles.optionTextActive]}>
                               {opt.label}
+                              {!current.isChild ? ` • ₱${opt.price}` : " • ₱0"}
                             </Text>
                           </Pressable>
                         );
@@ -501,35 +533,56 @@ export default function CreateTicket() {
                   )}
                 </View>
 
-                {/* PWD toggle */}
-                <View style={styles.ticketOptions}>
-                  <View style={styles.pwdRow}>
-                    <Text style={styles.pwdLabel}>
-                      {current.isChild ? "PWD" : "PWD/Senior Citizen/Pregnant Woman"}
-                    </Text>
-                    <Switch
-                      value={!!current.isPWD}
-                      onValueChange={(next) =>
-                        requestTogglePWD(tickets.indexOf(current), next)
-                      }
-                      thumbColor={current.isPWD ? "#071689" : "#f4f3f4"}
-                      trackColor={{ false: "#D1D5DB", true: "#BFD0FF" }}
-                    />
+                {!current.isChild && (
+                  <View style={styles.ticketOptions}>
+                    <View style={styles.pwdRow}>
+                      <Text style={styles.pwdLabel}>PWD/Senior Citizen/Pregnant Woman</Text>
+                      <Switch
+                        value={!!current.isPWD}
+                        onValueChange={(next) => requestTogglePWD(tickets.indexOf(current), next)}
+                        thumbColor={current.isPWD ? "#071689" : "#f4f3f4"}
+                        trackColor={{ false: "#D1D5DB", true: "#BFD0FF" }}
+                      />
+                    </View>
                   </View>
-                </View>
+                )}
+
+                {current.isChild && childTickets.length > 1 && (
+                  <View style={styles.childNavRow}>
+                    <Pressable
+                      onPress={() => setChildIndex((i) => Math.max(0, i - 1))}
+                      disabled={childIndex === 0}
+                      style={[styles.childNavBtn, childIndex === 0 && { opacity: 0.5 }]}
+                    >
+                      <Text style={styles.childNavBtnText}>Previous</Text>
+                    </Pressable>
+                    <Text style={styles.childNavLabel}>
+                      {childIndex + 1} / {childTickets.length}
+                    </Text>
+                    <Pressable
+                      onPress={() =>
+                        setChildIndex((i) => Math.min(childTickets.length - 1, i + 1))
+                      }
+                      disabled={childIndex >= childTickets.length - 1}
+                      style={[
+                        styles.childNavBtn,
+                        childIndex >= childTickets.length - 1 && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Text style={styles.childNavBtnText}>Next</Text>
+                    </Pressable>
+                  </View>
+                )}
               </>
-            ) : (
-              <Text>No tickets selected.</Text>
             )}
           </View>
 
-          {/* Subtotal */}
           <View style={styles.subtotalSection}>
             <Text style={styles.subtotalTitle}>Subtotal:</Text>
             {tickets.map((t, i) => (
               <View key={i} style={styles.lineItemRow}>
                 <Text style={styles.lineItemLeft}>
-                  1x {t.section ? `${t.section} (Team ${t.side})` : "Unassigned"} {t.isChild ? "(Child)" : ""}
+                  1x {t.section ? `${t.section} (${t.side})` : "Unassigned"} {t.isChild ? "(Child)" : "(Adult)"}
                 </Text>
                 <Text style={styles.lineItemRight}>₱{t.price || 0}</Text>
               </View>
@@ -541,17 +594,18 @@ export default function CreateTicket() {
             </View>
           </View>
 
-          {/* Actions */}
           <View style={styles.actionsRow}>
             <Pressable onPress={onBackPress} style={styles.backBtn} disabled={backDisabled}>
               <Text style={styles.backBtnText}>Back</Text>
             </Pressable>
             <Pressable
               onPress={onProceed}
-              disabled={tickets.length === 0 || anyInvalid}
+              disabled={tickets.length === 0 || tickets.some((t) => ticketErrors(t).length > 0)}
               style={[
                 styles.nextBtn,
-                (tickets.length === 0 || anyInvalid) && { backgroundColor: "#9CA3AF" },
+                (tickets.length === 0 || tickets.some((t) => ticketErrors(t).length > 0)) && {
+                  backgroundColor: "#9CA3AF",
+                },
               ]}
             >
               <Text style={styles.nextBtnText}>Confirm Payment</Text>
@@ -560,19 +614,13 @@ export default function CreateTicket() {
         </ScrollView>
       </SafeAreaView>
 
-      {/* PWD Warning Modal */}
-      <Modal
-        visible={warnVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={cancelTogglePWD}
-      >
+      <Modal visible={warnVisible} transparent animationType="fade" onRequestClose={cancelTogglePWD}>
         <Pressable style={styles.modalOverlay} onPress={cancelTogglePWD}>
           <TouchableWithoutFeedback>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Before you proceed</Text>
               <Text style={styles.modalBody}>
-                Be prepared to show a valid ID or proof at the venue, non-compliance may lead to cancellation of the tickets.
+                Be prepared to show a valid ID or proof at the venue; non-compliance may lead to cancellation of the tickets.
               </Text>
               <View style={styles.modalActions}>
                 <Pressable style={styles.modalCancel} onPress={cancelTogglePWD}>
@@ -587,31 +635,63 @@ export default function CreateTicket() {
         </Pressable>
       </Modal>
 
-      {/* Back Confirm Modal */}
       <Modal
-        visible={backWarnVisible}
+        visible={imgViewerVisible}
         transparent
         animationType="fade"
-        onRequestClose={cancelBack}
+        onRequestClose={() => setImgViewerVisible(false)}
       >
+        <View style={styles.viewerBackdrop}>
+          <View style={styles.viewerHeader}>
+            <Pressable onPress={() => setImgViewerVisible(false)} hitSlop={10}>
+              <Ionicons name="close" size={22} color="#fff" />
+            </Pressable>
+            <Text style={styles.viewerTitle}>{event?.venue?.name || "Venue Image"}</Text>
+            <View style={{ width: 22 }} />
+          </View>
+
+          <View style={styles.viewerBody}>
+            <Pressable style={styles.viewerImageWrap} onPress={() => setZoom((z) => Math.min(4, z + 0.5))}>
+              <Image
+                source={{ uri: venueImageUri }}
+                style={[styles.viewerImage, { transform: [{ scale: zoom }] }]}
+                resizeMode="contain"
+              />
+            </Pressable>
+
+            <View style={styles.zoomControls}>
+              <Pressable
+                onPress={() => setZoom((z) => Math.max(1, +(z - 0.25).toFixed(2)))}
+                style={styles.zoomBtn}
+              >
+                <Ionicons name="remove" size={18} color="#111827" />
+              </Pressable>
+              <Text style={styles.zoomPct}>{Math.round(zoom * 100)}%</Text>
+              <Pressable
+                onPress={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}
+                style={styles.zoomBtn}
+              >
+                <Ionicons name="add" size={18} color="#111827" />
+              </Pressable>
+              <Pressable onPress={() => setZoom(1)} style={[styles.zoomBtn, { paddingHorizontal: 10 }]}>
+                <Text style={{ color: "#111827", fontWeight: "700" }}>Reset</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={backWarnVisible} transparent animationType="fade" onRequestClose={cancelBack}>
         <Pressable style={styles.modalOverlay} onPress={cancelBack}>
           <TouchableWithoutFeedback>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Leave this screen?</Text>
-              <Text style={styles.modalBody}>
-                Your current ticket inputs will be discarded.
-              </Text>
+              <Text style={styles.modalBody}>Your current ticket inputs will be discarded.</Text>
               <View style={styles.modalActions}>
-                <Pressable
-                  style={[styles.modalCancel, { backgroundColor: "#E5E7EB" }]}
-                  onPress={cancelBack}
-                >
+                <Pressable style={[styles.modalCancel, { backgroundColor: "#E5E7EB" }]} onPress={cancelBack}>
                   <Text style={[styles.modalCancelText, { color: "#111827" }]}>Stay</Text>
                 </Pressable>
-                <Pressable
-                  style={[styles.modalConfirm, { backgroundColor: "#E53935" }]}
-                  onPress={confirmBack}
-                >
+                <Pressable style={[styles.modalConfirm, { backgroundColor: "#E53935" }]} onPress={confirmBack}>
                   <Text style={styles.modalConfirmText}>Leave</Text>
                 </Pressable>
               </View>
@@ -626,20 +706,32 @@ export default function CreateTicket() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#FFFFFF" },
   container: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40, gap: 14 },
-
   headerRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
   headerTitle: { fontSize: 18, fontWeight: "800", color: "#071689" },
   headerSubtitle: { fontSize: 13, color: "#4B5563" },
-
   card: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#D1D5DB",
     borderRadius: 14,
     padding: 12,
+    position: "relative",
+    overflow: "hidden",
   },
   mapImage: { width: "100%", height: 180, borderRadius: 8, backgroundColor: "#E5E7EB" },
-
+  tapHint: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  tapHintText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   ticketCountCard: {
     borderWidth: 1,
     borderColor: "#E5E7EB",
@@ -651,7 +743,6 @@ const styles = StyleSheet.create({
   ticketCountRow: { flexDirection: "row", gap: 16, alignItems: "flex-end" },
   ticketCountItem: { flex: 1 },
   ticketCountLabel: { fontSize: 13, color: "#374151", marginBottom: 4, fontWeight: "500" },
-
   selectBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -664,7 +755,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   selectText: { fontSize: 14, color: "#222" },
-
   ticketCountTotal: {
     fontSize: 16,
     fontWeight: "700",
@@ -683,7 +773,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: "italic",
   },
-
   dropdownMenu: {
     position: "absolute",
     top: 44,
@@ -705,8 +794,6 @@ const styles = StyleSheet.create({
   optionActive: { backgroundColor: "#EEF2FF" },
   optionText: { fontSize: 14, color: "#222" },
   optionTextActive: { color: "#071689", fontWeight: "700" },
-
-  // Adults / Children toggle
   typeToggle: {
     flexDirection: "row",
     backgroundColor: "#F8FAFC",
@@ -730,16 +817,8 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
-  typeBtnText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#64748B",
-  },
-  typeBtnTextActive: {
-    color: "#071689",
-    fontWeight: "700",
-  },
-
+  typeBtnText: { fontSize: 14, fontWeight: "600", color: "#64748B" },
+  typeBtnTextActive: { color: "#071689", fontWeight: "700" },
   ticketCard: {
     borderWidth: 1,
     borderColor: "#E5E7EB",
@@ -749,7 +828,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   ticketTitle: { fontSize: 16, fontWeight: "800", color: "#0F172A" },
-
   label: { fontSize: 13, color: "#374151", marginBottom: 4, fontWeight: "500" },
   input: {
     borderWidth: 1,
@@ -762,23 +840,31 @@ const styles = StyleSheet.create({
     color: "#111827",
     minHeight: 40,
   },
-
   dualRow: { flexDirection: "row", gap: 12 },
   fullNameContainer: { flex: 1 },
   ageBox: { width: 110 },
-
   sectionFullWidth: { marginTop: 4 },
-
   ticketOptions: { gap: 8, marginTop: 4 },
   pwdRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   pwdLabel: { fontSize: 12, color: "#374151", flex: 1 },
-
-  subtotalSection: {
+  childNavRow: {
     marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
   },
+  childNavBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    backgroundColor: "#FFFFFF",
+  },
+  childNavBtnText: { color: "#111827", fontWeight: "700" },
+  childNavLabel: { color: "#6B7280", fontSize: 12 },
+  subtotalSection: { marginTop: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#E5E7EB" },
   subtotalTitle: { fontSize: 16, fontWeight: "800", color: "#071689", marginBottom: 8 },
   lineItemRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
   lineItemLeft: { color: "#111827", fontSize: 14 },
@@ -787,7 +873,6 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: "row", justifyContent: "space-between" },
   totalLabel: { color: "#071689", fontWeight: "800", fontSize: 16 },
   totalValue: { color: "#071689", fontWeight: "800", fontSize: 16 },
-
   actionsRow: { marginTop: 20, flexDirection: "row", gap: 16 },
   backBtn: {
     flex: 1,
@@ -807,8 +892,6 @@ const styles = StyleSheet.create({
   },
   backBtnText: { color: "#fff", fontWeight: "700" },
   nextBtnText: { color: "#fff", fontWeight: "700" },
-
-  // Shared modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -828,18 +911,23 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 16, fontWeight: "800", color: "#0F172A" },
   modalBody: { fontSize: 14, color: "#111827" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 6 },
-  modalCancel: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "#E5E7EB",
-  },
+  modalCancel: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: "#E5E7EB" },
   modalCancelText: { color: "#111827", fontWeight: "700" },
-  modalConfirm: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "#071689",
-  },
+  modalConfirm: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: "#071689" },
   modalConfirmText: { color: "#fff", fontWeight: "700" },
+  viewerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.95)" },
+  viewerHeader: {
+    paddingTop: 14, paddingHorizontal: 16, paddingBottom: 10,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+  },
+  viewerTitle: { color: "#fff", fontWeight: "800" },
+  viewerBody: { flex: 1, paddingHorizontal: 10, paddingBottom: 18 },
+  viewerImageWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  viewerImage: { width: "100%", height: "100%" },
+  zoomControls: {
+    position: "absolute", bottom: 18, left: 0, right: 0,
+    alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10,
+  },
+  zoomBtn: { backgroundColor: "#ffffff", borderColor: "#D1D5DB", borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  zoomPct: { color: "#fff", fontWeight: "700", width: 48, textAlign: "center" },
 });

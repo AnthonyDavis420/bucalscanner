@@ -1,32 +1,66 @@
 // app/views/welcome.tsx
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    BackHandler,
-    Image,
-    Modal,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  BackHandler,
+  Image,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+const STORAGE_KEYS = {
+  eventId: "bucalscanner.activeEventId",
+  seasonId: "bucalscanner.activeSeasonId",
+  eventName: "bucalscanner.activeEventName",
+};
+
 export default function Welcome() {
   const [showExit, setShowExit] = useState(false);
+  const [eventId, setEventId] = useState<string>("");
+  const [eventName, setEventName] = useState<string>("");
 
   // Intercept Android back button: show modal instead of navigating
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (showExit) {
-        setShowExit(false);
-      } else {
-        setShowExit(true);
-      }
+      if (showExit) setShowExit(false);
+      else setShowExit(true);
       return true;
     });
     return () => sub.remove();
   }, [showExit]);
+
+  // Load active event info
+  useEffect(() => {
+    (async () => {
+      try {
+        const [id, name] = await AsyncStorage.multiGet([
+          STORAGE_KEYS.eventId,
+          STORAGE_KEYS.eventName,
+        ]);
+        setEventId((id?.[1] || "").trim());
+        setEventName((name?.[1] || "").trim());
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const handleChangeEvent = async () => {
+    try {
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.eventId,
+        STORAGE_KEYS.seasonId,
+        STORAGE_KEYS.eventName,
+      ]);
+    } catch {}
+    router.replace("/"); // go back to event code entry
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -37,17 +71,42 @@ export default function Welcome() {
           resizeMode="contain"
         />
 
+        {/* Active event banner */}
+        <View style={styles.banner}>
+          <Text style={styles.bannerTitle}>
+            {eventName ? eventName : "Active Event"}
+          </Text>
+          <Text style={styles.bannerSub}>
+            {eventId ? `Event ID: ${eventId}` : "No event selected yet"}
+          </Text>
+          <Pressable onPress={handleChangeEvent} style={styles.changeBtn}>
+            <Text style={styles.changeBtnText}>Change Event</Text>
+          </Pressable>
+        </View>
+
         <View style={styles.buttonsContainer}>
           <Pressable
             style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={() => router.push("views/scanner")}
+            onPress={() => {
+              if (!eventId) {
+                Alert.alert("No Event", "Please choose an event first.");
+                return;
+              }
+              router.push("/views/scanner");
+            }}
           >
             <Text style={styles.buttonText}>Scan Tickets</Text>
           </Pressable>
 
           <Pressable
             style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-            onPress={() => router.push("views/createTicket")}
+            onPress={() => {
+              if (!eventId) {
+                Alert.alert("No Event", "Please choose an event first.");
+                return;
+              }
+              router.push("/views/createTicket");
+            }}
           >
             <Text style={styles.buttonText}>On-site Purchase</Text>
           </Pressable>
@@ -55,7 +114,13 @@ export default function Welcome() {
 
         <Pressable
           style={({ pressed }) => [styles.viewTicketsButton, pressed && styles.buttonPressed]}
-          onPress={() => router.push("views/allTickets")}
+          onPress={() => {
+            if (!eventId) {
+              Alert.alert("No Event", "Please choose an event first.");
+              return;
+            }
+            router.push("/views/allTickets");
+          }}
         >
           <Text style={styles.buttonText}>View Tickets</Text>
         </Pressable>
@@ -69,38 +134,27 @@ export default function Welcome() {
         onRequestClose={() => setShowExit(false)}
       >
         <View style={styles.modalBackdrop}>
-          {/* Tap outside to close */}
           <Pressable style={styles.modalBackdropTap} onPress={() => setShowExit(false)} />
-
-          {/* Card */}
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Logout?</Text>
+            <Text style={styles.modalTitle}>Exit app?</Text>
             <Text style={styles.modalText}>
-              You’re on the home screen. Do you want to Logout?
+              You’re on the home screen. Do you want to exit BucalScanner?
             </Text>
 
             <View style={styles.modalRow}>
-              {/* LEFT: Exit (red) */}
               <Pressable
                 onPress={() => {
                   setShowExit(false);
                   BackHandler.exitApp();
                 }}
-                style={({ pressed }) => [
-                  styles.modalDanger,
-                  pressed && { opacity: 0.9 },
-                ]}
+                style={({ pressed }) => [styles.modalDanger, pressed && { opacity: 0.9 }]}
               >
                 <Text style={{ color: "#fff", fontWeight: "700" }}>Exit</Text>
               </Pressable>
 
-              {/* RIGHT: Stay (blue) */}
               <Pressable
                 onPress={() => setShowExit(false)}
-                style={({ pressed }) => [
-                  styles.modalPrimary,
-                  pressed && { opacity: 0.9 },
-                ]}
+                style={({ pressed }) => [styles.modalPrimary, pressed && { opacity: 0.9 }]}
               >
                 <Text style={{ color: "#fff", fontWeight: "700" }}>Stay</Text>
               </Pressable>
@@ -112,6 +166,8 @@ export default function Welcome() {
   );
 }
 
+const BLUE = "#071689";
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
   container: {
@@ -120,13 +176,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  logo: { width: 264, height: 264, marginBottom: 48 },
+  logo: { width: 200, height: 200, marginBottom: 18 },
+
+  banner: {
+    width: "100%",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    padding: 14,
+    marginBottom: 22,
+    backgroundColor: "#F8FAFF",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  bannerTitle: { fontSize: 16, fontWeight: "800", color: "#0F172A" },
+  bannerSub: { fontSize: 13, color: "#4B5563" },
+  changeBtn: {
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#EEF2FF",
+  },
+  changeBtnText: { color: BLUE, fontWeight: "700", fontSize: 12 },
+
   buttonsContainer: { width: "100%", marginBottom: 32 },
   button: {
     width: "100%",
     height: 85,
     borderRadius: 10,
-    backgroundColor: "#071689",
+    backgroundColor: BLUE,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
@@ -135,7 +214,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 52,
     borderRadius: 10,
-    backgroundColor: "#071689",
+    backgroundColor: BLUE,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -150,31 +229,24 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
-  // full-screen invisible layer to capture taps
-  modalBackdropTap: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  modalBackdropTap: { ...StyleSheet.absoluteFillObject },
   modalCard: {
-    width: "88%",            // extra whitespace at the sides
+    width: "88%",
     borderRadius: 16,
     backgroundColor: "#fff",
-    paddingHorizontal: 22,   // a bit more inner padding
+    paddingHorizontal: 22,
     paddingVertical: 18,
   },
   modalTitle: { fontSize: 18, fontWeight: "800", color: "#111" },
   modalText: { marginTop: 8, color: "#4B5563" },
-  modalRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 18,
-  },
+  modalRow: { flexDirection: "row", gap: 12, marginTop: 18 },
   modalDanger: {
     flex: 1,
     height: 48,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#E53935", // red
+    backgroundColor: "#E53935",
   },
   modalPrimary: {
     flex: 1,
@@ -182,6 +254,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#071689", // blue
+    backgroundColor: BLUE,
   },
 });
