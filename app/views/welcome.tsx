@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
+  Alert,
   BackHandler,
   Image,
   Modal,
@@ -10,7 +11,6 @@ import {
   StyleSheet,
   Text,
   View,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -124,6 +124,24 @@ export default function Welcome() {
         >
           <Text style={styles.buttonText}>View Tickets</Text>
         </Pressable>
+
+        {/* NEW: View Vouchers button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.viewTicketsButton,
+            { marginTop: 12 },
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={() => {
+            if (!eventId) {
+              Alert.alert("No Event", "Please choose an event first.");
+              return;
+            }
+            router.push("/views/allVouchers");
+          }}
+        >
+          <Text style={styles.buttonText}>View Vouchers</Text>
+        </Pressable>
       </View>
 
       {/* Exit confirmation */}
@@ -203,7 +221,7 @@ const styles = StyleSheet.create({
   buttonsContainer: { width: "100%", marginBottom: 32 },
   button: {
     width: "100%",
-    height: 85,
+    height: 70,
     borderRadius: 10,
     backgroundColor: BLUE,
     alignItems: "center",
