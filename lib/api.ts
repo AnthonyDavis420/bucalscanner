@@ -1,4 +1,3 @@
-// lib/api.ts
 import Constants from "expo-constants";
 
 export type EventDetails = {
@@ -44,8 +43,6 @@ export type TicketSummary = {
   price: number | null;
   bundleId?: string | null;
   parentTicketId?: string | null;
-
-  // 🔹 status added so we can read t.status on mobile
   status?:
     | "active"
     | "pending"
@@ -55,9 +52,26 @@ export type TicketSummary = {
     | "cancelled"
     | string
     | null;
-
-  // optional: role ("sponsor", "child", etc.)
   role?: string | null;
+  url?: string | null;
+  ticket?: { ticketUrl?: string | null; ticketPath?: string | null } | null;
+};
+
+export type VoucherSummary = {
+  id: string;
+  status?: string | null;
+  name?: string | null;
+  code?: string | null;
+  issuer?: string | null;
+  maxUses?: number | null;
+  usedCount?: number | null;
+  assignedName?: string | null;
+  assignedType?: string | null;
+  ticketUrl?: string | null;
+  sectionName?: string | null;
+  teamSide?: string | null;
+  validUntil?: string | null;
+  notes?: string | null;
 };
 
 export type ResolveEventItem = {
@@ -239,17 +253,103 @@ export const scannerApi = {
     );
   },
 
-  // 🔹 NEW: validate voucher via backend so we can block cancelled/expired
   async fetchVoucher(
     eventId: string,
     seasonId: string,
     voucherId: string
-  ): Promise<{ ok: true; item: { id: string; status?: string | null } }> {
+  ): Promise<{ ok: true; item: VoucherSummary }> {
     const qs = new URLSearchParams({ seasonId, voucherId }).toString();
-    return getJson<{ ok: true; item: { id: string; status?: string | null } }>(
+    const raw = await getJson<{ ok: true; item: any }>(
       `/api/scanner/event-details/${encodeURIComponent(
         eventId
       )}/vouchers?${qs}`
+    );
+    const src = raw.item ?? raw;
+
+    const maxUsesSrc =
+      src.maxUses ?? src.max_uses ?? src.maxPax ?? src.max_pax ?? null;
+    const maxUsesNum = maxUsesSrc != null ? Number(maxUsesSrc) : null;
+    const maxUses =
+      maxUsesNum != null && Number.isFinite(maxUsesNum) ? maxUsesNum : null;
+
+    const usedSrc =
+      src.usedCount ?? src.used_count ?? src.uses ?? src.useCount ?? null;
+    const usedNum = usedSrc != null ? Number(usedSrc) : null;
+    const usedCount =
+      usedNum != null && Number.isFinite(usedNum) ? usedNum : null;
+
+    const assignedName =
+      src.assignedName ?? src.assigned_name ?? src.assignedTo?.name ?? null;
+
+    const assignedType =
+      src.assignedType ?? src.assigned_type ?? src.assignedTo?.type ?? null;
+
+    const ticketUrl =
+      src.ticket?.ticketUrl ??
+      src.ticket?.ticket_url ??
+      src.ticketUrl ??
+      src.ticket_url ??
+      src.imageUrl ??
+      src.image_url ??
+      null;
+
+    const sectionName =
+      src.sectionName ?? src.section_name ?? src.section ?? null;
+
+    const teamSide =
+      src.teamSide ??
+      src.team_side ??
+      src.sideLabel ??
+      src.side_label ??
+      null;
+
+    const validUntil =
+      src.validUntil ??
+      src.valid_until ??
+      src.expiresAt ??
+      src.expires_at ??
+      null;
+
+    const notes = src.notes ?? src.remark ?? src.remarks ?? null;
+
+    const item: VoucherSummary = {
+      id: String(src.id ?? src.voucherId ?? src.voucher_id ?? voucherId),
+      status: src.status ?? null,
+      name: src.name ?? src.voucherName ?? null,
+      code: src.code ?? src.voucherCode ?? src.id ?? voucherId,
+      issuer: src.issuer ?? src.issuedBy ?? src.issuerName ?? null,
+      maxUses,
+      usedCount,
+      assignedName,
+      assignedType,
+      ticketUrl,
+      sectionName,
+      teamSide,
+      validUntil,
+      notes,
+    };
+
+    return { ok: true, item };
+  },
+
+  async useVoucher(
+    eventId: string,
+    seasonId: string,
+    voucherId: string,
+    uses: number
+  ): Promise<{
+    ok: true;
+    item?: { id: string; usedCount?: number | null; maxUses?: number | null };
+  }> {
+    const sp = new URLSearchParams({ seasonId, voucherId }).toString();
+    return patchJson<{
+      ok: true;
+      item?: { id: string; usedCount?: number | null; maxUses?: number | null };
+    }>(
+      `/api/scanner/event-details/${encodeURIComponent(
+        eventId
+      )}/vouchers?${sp}`,
+      { use: uses }
     );
   },
 
@@ -291,12 +391,11 @@ export const scannerApi = {
     );
   },
 
-  // 🔹 Single-ticket status update (used by Redeem / Invalid buttons)
   async updateTicketStatus(
     eventId: string,
     seasonId: string,
     ticketId: string,
-    status: "redeemed" | "invalid"
+    status: "redeemed" | "invalid" | "active"
   ): Promise<{ ok: true }> {
     const sp = new URLSearchParams({ seasonId });
     return patchJson<{ ok: true }>(
@@ -304,6 +403,21 @@ export const scannerApi = {
         eventId
       )}/tickets?${sp.toString()}`,
       { ids: [ticketId], status }
+    );
+  },
+
+  async redeemVoucher(
+    eventId: string,
+    seasonId: string,
+    voucherId: string,
+    addUses: number
+  ): Promise<{ ok: true }> {
+    const sp = new URLSearchParams({ seasonId });
+    return patchJson<{ ok: true }>(
+      `/api/scanner/event-details/${encodeURIComponent(
+        eventId
+      )}/vouchers?${sp.toString()}`,
+      { voucherId, addUses }
     );
   },
 

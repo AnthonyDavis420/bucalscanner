@@ -1,4 +1,3 @@
-// app/views/scanner.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useIsFocused } from "@react-navigation/native";
@@ -35,6 +34,16 @@ function showStatusAlert(
   statusRaw: string | null | undefined
 ) {
   const s = normalizeStatus(statusRaw);
+
+  if (kind === "Voucher" && (s === "redeemed" || s === "used")) {
+    Alert.alert(
+      "Voucher Fully Redeemed",
+      "This voucher has been fully redeemed. Please contact BUCAL staff for a new voucher.",
+      [{ text: "OK" }]
+    );
+    return;
+  }
+
   let nice = s;
 
   if (["redeemed", "used"].includes(s)) nice = "already redeemed";
@@ -72,7 +81,6 @@ export default function Scanner() {
   const [seasonId, setSeasonId] = useState<string>("");
   const [eventName, setEventName] = useState<string>("");
 
-  // Load active event info (same keys as welcome.tsx)
   useEffect(() => {
     (async () => {
       try {
@@ -85,13 +93,10 @@ export default function Scanner() {
         setEventId((id?.[1] || "").trim());
         setSeasonId((season?.[1] || "").trim());
         setEventName((name?.[1] || "").trim());
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
   }, []);
 
-  // Request camera permission once
   useEffect(() => {
     if (!permission) {
       requestPermission();
@@ -127,7 +132,6 @@ export default function Scanner() {
       try {
         parsed = JSON.parse(raw);
       } catch {
-        // Non-JSON payload → fallback to generic ticket confirm
         console.log("SCANNED PARSED: non-JSON payload");
         router.push({
           pathname: "/views/confirmTicket",
@@ -144,12 +148,15 @@ export default function Scanner() {
       const encodedPayload = encodeURIComponent(raw);
 
       const kind = String(parsed.kind || "").toLowerCase();
-      const hasVoucherHint = kind === "voucher" || parsed.voucherId || parsed.voucher_id;
-      const hasTicketHint = kind === "ticket" || parsed.ticketId || parsed.ticket_id;
+      const hasVoucherHint =
+        kind === "voucher" || parsed.voucherId || parsed.voucher_id;
+      const hasTicketHint =
+        kind === "ticket" || parsed.ticketId || parsed.ticket_id;
 
-      // ==========================
-      // 🔹 VOUCHER FLOW
-      // ==========================
+      const activeEventId = (eventId || "").trim();
+      const activeSeasonId = (seasonId || "").trim();
+
+      // 1) VOUCHER FLOW
       if (hasVoucherHint && !hasTicketHint) {
         const voucherIdFromCode = String(
           parsed.voucherId ?? parsed.voucher_id ?? ""
@@ -175,6 +182,20 @@ export default function Scanner() {
           return;
         }
 
+        if (
+          activeEventId &&
+          activeSeasonId &&
+          (eventFromCode !== activeEventId ||
+            seasonFromCode !== activeSeasonId)
+        ) {
+          Alert.alert(
+            "Wrong Event",
+            "This voucher belongs to a different event.",
+            [{ text: "OK" }]
+          );
+          return;
+        }
+
         try {
           const resp = await scannerApi.fetchVoucher(
             eventFromCode,
@@ -191,7 +212,6 @@ export default function Scanner() {
             voucherStatusRaw,
           });
 
-          // block everything that is not clearly active
           if (!voucherStatus || voucherStatus !== "active") {
             showStatusAlert("Voucher", voucherStatus || "");
             return;
@@ -205,7 +225,6 @@ export default function Scanner() {
           return;
         }
 
-        // ✅ voucher is active → go to confirmVoucher
         router.push({
           pathname: "/views/confirmVoucher",
           params: { code: encodedPayload },
@@ -213,9 +232,7 @@ export default function Scanner() {
         return;
       }
 
-      // ==========================
-      // 🔹 TICKET FLOW
-      // ==========================
+      // 2) TICKET FLOW
       const seasonFromCode = String(
         parsed.seasonId ?? parsed.season_id ?? seasonId ?? ""
       ).trim();
@@ -231,6 +248,20 @@ export default function Scanner() {
         seasonFromCode,
         ticketIdFromCode,
       });
+
+      if (
+        activeEventId &&
+        activeSeasonId &&
+        (eventFromCode !== activeEventId ||
+          seasonFromCode !== activeSeasonId)
+      ) {
+        Alert.alert(
+          "Wrong Event",
+          "This ticket belongs to a different event. Please switch events in the app before scanning.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
 
       if (seasonFromCode && eventFromCode && ticketIdFromCode) {
         try {
@@ -258,7 +289,6 @@ export default function Scanner() {
             parentTicketId,
           });
 
-          // 🔸 Special case: already redeemed/used
           if (status === "redeemed" || status === "used") {
             Alert.alert(
               "Ticket Already Redeemed",
@@ -268,9 +298,39 @@ export default function Scanner() {
             return;
           }
 
-          // 💡 Only allow tickets with explicit "active" status
+          // 🔴 New special handling for INVALID tickets
           if (!status || status !== "active") {
-            showStatusAlert("Ticket", status || "");
+            if (status === "invalid") {
+              // Ask staff if they want to overwrite an invalid ticket
+              Alert.alert(
+                "Invalid Ticket",
+                "This ticket has been marked as invalid. Do you wish to overwrite it?",
+                [
+                  {
+                    text: "No",
+                    style: "cancel",
+                    // Do nothing, just stay on scanner
+                  },
+                  {
+                    text: "Yes",
+                    onPress: () => {
+                      // Proceed to confirm screen to let them overwrite
+                      router.push({
+                        pathname: "/views/confirmTicket",
+                        params: {
+                          mode: "scan",
+                          code: encodedPayload,
+                          eventName: eventName || "Event Ticket",
+                        },
+                      });
+                    },
+                  },
+                ]
+              );
+            } else {
+              // Other non-active statuses (expired, cancelled, pending, etc.)
+              showStatusAlert("Ticket", status || "");
+            }
             return;
           }
 
@@ -318,6 +378,17 @@ export default function Scanner() {
               return;
             }
           }
+
+          // ✅ All checks passed for this ticket → go to confirm screen
+          router.push({
+            pathname: "/views/confirmTicket",
+            params: {
+              mode: "scan",
+              code: encodedPayload,
+              eventName: eventName || "Event Ticket",
+            },
+          });
+          return;
         } catch (err: any) {
           console.log("FETCH TICKET ERROR:", err);
           Alert.alert(
@@ -328,17 +399,18 @@ export default function Scanner() {
         }
       }
 
-      // ✅ If we reach here, ticket is allowed → go to ConfirmTicket
-      router.push({
-        pathname: "/views/confirmTicket",
-        params: {
-          mode: "scan",
-          code: encodeURIComponent(raw),
-          eventName: eventName || "Event Ticket",
-        },
-      });
+      // Fallback: if ticket IDs are not present in the payload, still allow confirm screen.
+      if (!seasonFromCode || !eventFromCode || !ticketIdFromCode) {
+        router.push({
+          pathname: "/views/confirmTicket",
+          params: {
+            mode: "scan",
+            code: encodedPayload,
+            eventName: eventName || "Event Ticket",
+          },
+        });
+      }
     } finally {
-      // Small lock to prevent multiple triggers from the same QR
       setTimeout(() => setScanningLocked(false), 1500);
     }
   };

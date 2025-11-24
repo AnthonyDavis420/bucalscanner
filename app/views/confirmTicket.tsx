@@ -1,4 +1,3 @@
-// app/views/confirmTicket.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
@@ -33,7 +32,7 @@ export default function ConfirmTicket() {
     side?: string;
     ticketId?: string;
     ticketUrl?: string;
-    code?: string; // QR payload (JSON), URL-encoded
+    code?: string;
   }>();
 
   const mode =
@@ -50,7 +49,6 @@ export default function ConfirmTicket() {
   const [error, setError] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
 
-  // Context for update calls
   const [ctx, setCtx] = useState<{
     seasonId: string;
     eventId: string;
@@ -59,7 +57,6 @@ export default function ConfirmTicket() {
 
   const [actionBusy, setActionBusy] = useState(false);
 
-  // Fallback values (for create/manual mode)
   const fallbackEventName =
     (Array.isArray(params.eventName) ? params.eventName[0] : params.eventName) ||
     "Event Ticket";
@@ -76,11 +73,8 @@ export default function ConfirmTicket() {
     (Array.isArray(params.ticketUrl) ? params.ticketUrl[0] : params.ticketUrl) ||
     "";
 
-  // Event name: for scanner, we trust what was passed from the Scanner screen;
-  // otherwise use a generic label.
   const eventName = fallbackEventName;
 
-  // Fetch ticket details when in scanner mode
   useEffect(() => {
     if (!isScanMode) {
       setLoading(false);
@@ -125,12 +119,12 @@ export default function ConfirmTicket() {
         setLoading(true);
         setError(null);
         const res = await scannerApi.fetchTickets(eventId, seasonId, [ticketId]);
+        console.log("CONFIRM_TICKET_RES:", JSON.stringify(res, null, 2));
         const t = (res.items || [])[0] || null;
         if (!t) {
           setError("Ticket not found.");
         } else {
           setTicket(t);
-
           const rawStatus = String((t as any).status || "").toLowerCase();
           const allowed: TicketStatus[] = [
             "active",
@@ -152,7 +146,6 @@ export default function ConfirmTicket() {
     })();
   }, [isScanMode, params.code, params.ticketId]);
 
-  // Derive display fields
   const holderFromTicket = ticket?.assignedName;
   const sideFromTicket =
     ticket && (ticket.sectionName || ticket.sideLabel)
@@ -168,7 +161,11 @@ export default function ConfirmTicket() {
       | "priority"
       | undefined;
 
-  const imageFromTicket = ticket?.ticketUrl || null;
+  const imageFromTicket =
+    ((ticket as any)?.ticketUrl ||
+      (ticket as any)?.url ||
+      (ticket as any)?.ticket?.ticketUrl ||
+      null) as string | null;
 
   const effectiveHolder = holderFromTicket || fallbackHolder;
   const effectiveSide = sideFromTicket || fallbackSide;
@@ -180,8 +177,8 @@ export default function ConfirmTicket() {
       ? "priority"
       : "adult";
 
-  // In scan mode, use ticket image; in create mode, use ticketUrl from params
-  const ticketImageUrl = isScanMode ? imageFromTicket : fallbackTicketUrl || null;
+  const ticketImageUrl = imageFromTicket || fallbackTicketUrl || null;
+  console.log("ticketImageUrl =", ticketImageUrl);
 
   const header = useMemo(() => {
     if (isCreateMode) {
@@ -206,7 +203,6 @@ export default function ConfirmTicket() {
   const handleUpdateStatus = async (nextStatus: "redeemed" | "invalid") => {
     if (actionBusy) return;
 
-    // If somehow we don't have context (manual mode), just update UI
     if (!ticket || !ctx) {
       setStatus(nextStatus);
       return;
@@ -234,29 +230,58 @@ export default function ConfirmTicket() {
     }
   };
 
+  const handleUndoToActive = async () => {
+    if (actionBusy) return;
+
+    if (!ticket || !ctx) {
+      setStatus("active");
+      return;
+    }
+
+    try {
+      setActionBusy(true);
+      await scannerApi.updateTicketStatus(
+        ctx.eventId,
+        ctx.seasonId,
+        ticket.id,
+        "active"
+      );
+      setStatus("active");
+      setTicket((prev) =>
+        prev ? ({ ...prev, status: "active" } as TicketSummary) : prev
+      );
+    } catch (e: any) {
+      Alert.alert(
+        "Undo failed",
+        e?.message || "Could not revert ticket status. Please try again."
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const handleRedeem = () => void handleUpdateStatus("redeemed");
   const handleInvalidate = () => void handleUpdateStatus("invalid");
 
-  const handleBack = () => {
+  const handleBack = async () => {
     if (isCreateMode) {
       router.replace("/views/welcome");
       return;
     }
-    if (
-      status === "active" ||
-      status === "expired" ||
-      status === "cancelled" ||
-      status === "pending"
-    ) {
-      router.back();
-    } else {
-      // for redeemed/invalid we reset local state when going back
-      setTimeout(() => setStatus("active"), 50);
-      router.back();
+
+    if (status === "redeemed" || status === "invalid") {
+      await handleUndoToActive();
+      return;
     }
+
+    router.back();
   };
 
-  const handleScanAgain = () => router.replace("/views/scanner");
+  const handleScanAgain = () => {
+    if (actionBusy) return;
+    router.back();
+  };
+
   const goHome = () => router.replace("/views/welcome");
   const createNextTicket = () => router.replace("/views/createTicket");
 
@@ -265,13 +290,7 @@ export default function ConfirmTicket() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.topBar}>
-        <Pressable
-          onPress={handleBack}
-          hitSlop={12}
-          style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
-        >
-          <Ionicons name="arrow-back" size={22} color="#000" />
-        </Pressable>
+        <View style={{ width: 22 }} />
         <Text style={[styles.title, { color: header?.color }]}>{header?.text}</Text>
         <View style={{ width: 22 }} />
       </View>
@@ -298,7 +317,6 @@ export default function ConfirmTicket() {
 
         {!loading && !error && (
           <>
-            {/* Clickable + zoomable ticket preview */}
             <Pressable
               style={styles.ticketWrap}
               onPress={() => {
@@ -310,6 +328,10 @@ export default function ConfirmTicket() {
                   source={{ uri: ticketImageUrl }}
                   style={styles.ticketImage}
                   resizeMode="contain"
+                  onError={(e) => {
+                    console.log("IMAGE LOAD ERROR:", e.nativeEvent);
+                    console.log("IMAGE URI THAT FAILED:", ticketImageUrl);
+                  }}
                 />
               ) : (
                 <View style={styles.ticketFallback}>
@@ -318,7 +340,6 @@ export default function ConfirmTicket() {
               )}
             </Pressable>
 
-            {/* Priority badge */}
             {showPriorityBadge && (
               <View style={styles.badgeRow}>
                 <View style={styles.priorityBadge}>
@@ -327,7 +348,6 @@ export default function ConfirmTicket() {
               </View>
             )}
 
-            {/* Meta details */}
             <View style={styles.meta}>
               <MetaRow label="Event" value={eventName} />
               <MetaRow label="Name" value={effectiveHolder} />
@@ -335,7 +355,6 @@ export default function ConfirmTicket() {
               <MetaRow label="Ticket ID" value={effectiveTicketId} />
             </View>
 
-            {/* CREATE MODE actions */}
             {isCreateMode && (
               <View style={styles.row}>
                 <Pressable onPress={goHome} style={[styles.cta, styles.ghost]}>
@@ -352,7 +371,6 @@ export default function ConfirmTicket() {
               </View>
             )}
 
-            {/* SCAN / VALIDATE MODE actions */}
             {!isCreateMode && status === "active" && (
               <View style={styles.row}>
                 <Pressable
@@ -402,7 +420,9 @@ export default function ConfirmTicket() {
               (status === "redeemed" || status === "invalid") && (
                 <View style={styles.row}>
                   <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
-                    <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
+                    <Text style={[styles.ctaText, { color: "#111" }]}>
+                      Revert Changes
+                    </Text>
                   </Pressable>
                   <Pressable
                     onPress={handleScanAgain}
@@ -416,7 +436,6 @@ export default function ConfirmTicket() {
         )}
       </View>
 
-      {/* Zoom modal with pinch + swipe */}
       <Modal
         visible={zoomOpen}
         transparent
@@ -474,7 +493,6 @@ function MetaRow({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
-
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -485,9 +503,7 @@ const styles = StyleSheet.create({
   },
   iconBtn: { padding: 6, borderRadius: 8 },
   title: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "800" },
-
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
-
   centerBox: {
     flex: 1,
     alignItems: "center",
@@ -496,7 +512,6 @@ const styles = StyleSheet.create({
   },
   muted: { color: "#6B7280", fontSize: 13 },
   errorText: { color: "#E53935", fontWeight: "700", textAlign: "center" },
-
   ticketWrap: {
     width: "100%",
     borderRadius: 12,
@@ -519,7 +534,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   badgeRow: {
     alignItems: "center",
     marginBottom: 10,
@@ -538,12 +552,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0.5,
   },
-
   meta: { gap: 10 },
   metaRow: { flexDirection: "row", gap: 6 },
   metaLabel: { width: 92, color: "#444", fontSize: 14 },
   metaValue: { flex: 1, color: "#111", fontWeight: "600", fontSize: 14 },
-
   row: {
     flexDirection: "row",
     gap: 12,
@@ -561,7 +573,6 @@ const styles = StyleSheet.create({
   },
   ghost: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#E5E7EB" },
   ctaText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

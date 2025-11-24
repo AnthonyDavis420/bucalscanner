@@ -204,54 +204,55 @@ export default function ConfirmPayment() {
     cancelProvisional().finally(goBackToCreate);
   }, [cancelProvisional, goBackToCreate]);
 
-  const handleConfirmPayment = async () => {
-    if (finalizing) return;
-    try {
-      setFinalizing(true);
-      const ids = createdIdsRef.current;
-      const bundleId = bundleIdRef.current || undefined;
-      if (!ids?.length && !bundleId) throw new Error("Nothing to confirm");
+    const handleConfirmPayment = async () => {
+      if (finalizing) return;
+      try {
+        setFinalizing(true);
+        const ids = createdIdsRef.current;
+        const bundleId = bundleIdRef.current || undefined;
+        if (!ids?.length && !bundleId) throw new Error("Nothing to confirm");
 
-      await scannerApi.confirmTickets(eventId, seasonId, ids, bundleId, "active");
-      confirmedRef.current = true;
+        await scannerApi.confirmTickets(eventId, seasonId, ids, bundleId, "active");
+        confirmedRef.current = true;
 
-      const itemsJson = JSON.stringify(
-        uiTickets.map((s) => ({
-          id: s.id,
-          url: s.url,
-          seatLabel: s.seatLabel,
-          seatDetail: s.seatDetail,
-          type: s.type,
-        }))
-      );
+        const itemsJson = JSON.stringify(
+          uiTickets.map((s) => ({
+            id: s.id,
+            url: s.url,
+            seatLabel: s.seatLabel,
+            seatDetail: s.seatDetail,
+            type: s.type,
+          }))
+        );
 
-      const t = uiTickets[idx];
-      if (t) {
-        router.push({
-          pathname: "./approveTicket",
-          params: {
-            mode: "create",
-            status: "active",
-            eventName: eventTitle || "",
-            items: itemsJson,
-            initialIndex: String(idx),
+        const t = uiTickets[idx];
+        if (t) {
+          router.push({
+            pathname: "/views/approveTicket",
+            params: {
+              status: "active",
+              eventName: eventTitle || "",
+              items: itemsJson,
+              initialIndex: String(idx),
 
-            // single-ticket fallback
-            holderName: t.seatLabel,
-            side: t.seatDetail,
-            ticketId: t.id,
-            ticketUrl: t.url,
-          },
-        });
-      } else {
-        router.replace("/views/allTickets");
+              eventId,
+              seasonId,
+              bundleId: bundleId || "",
+
+              // single-ticket fallback
+              ticketId: t.id,
+              ticketUrl: t.url,
+            },
+          });
+        } else {
+          router.replace("/views/allTickets");
+        }
+      } catch (e: any) {
+        setError(e?.message || "Failed to confirm tickets");
+      } finally {
+        setFinalizing(false);
       }
-    } catch (e: any) {
-      setError(e?.message || "Failed to confirm tickets");
-    } finally {
-      setFinalizing(false);
-    }
-  };
+    };
 
   return (
     <SafeAreaView style={styles.safe}>
