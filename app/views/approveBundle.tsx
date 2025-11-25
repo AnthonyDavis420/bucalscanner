@@ -1,4 +1,3 @@
-// app/views/approveBundle.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -10,7 +9,7 @@ import {
   StyleSheet,
   Text,
   View,
-  ScrollView, // 👈 added
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -48,10 +47,11 @@ function asString(v: string | string[] | undefined, fallback = "") {
 }
 
 function mapSummaryToUi(src: TicketSummary): UITicket {
+  const anySrc = src as any;
   const imageUrl =
-    ((src as any)?.ticketUrl ||
-      (src as any)?.url ||
-      (src as any)?.ticket?.ticketUrl ||
+    (anySrc?.ticket?.ticketUrl ||
+      anySrc?.ticketUrl ||
+      anySrc?.url ||
       "") as string;
 
   return {
@@ -77,6 +77,7 @@ export default function ApproveBundle() {
     amountPaid?: string | string[];
     items?: string | string[];
     initialIndex?: string | string[];
+    source?: string | string[];
   }>();
 
   const eventId = asString(params.eventId, "");
@@ -85,6 +86,8 @@ export default function ApproveBundle() {
   const bundleId = asString(params.bundleId, "");
   const countParam = asString(params.count, "");
   const amountPaid = asString(params.amountPaid, "");
+  const source = asString(params.source, "tickets");
+  const fromScanner = source === "scanner";
 
   const rawItems = asString(params.items, "");
   const rawInitialIndex = asString(params.initialIndex, "");
@@ -104,7 +107,7 @@ export default function ApproveBundle() {
   }
 
   const [tickets, setTickets] = useState<UITicket[]>(parsedItems);
-  const [loading, setLoading] = useState(!parsedItems.length);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const baseInitialIndex = (() => {
@@ -166,11 +169,25 @@ export default function ApproveBundle() {
     translateY.value = 0;
   };
 
-  // If no items were passed, refetch tickets for this bundle
+  const openZoom = () => {
+    resetZoom();
+    setZoomVisible(true);
+  };
+
+  const closeZoom = () => {
+    setZoomVisible(false);
+    resetZoom();
+  };
+
+  // 🔁 Always refetch bundle tickets to get reliable preview URLs
   useEffect(() => {
-    if (tickets.length || !eventId || !seasonId || !bundleId) return;
+    if (!eventId || !seasonId || !bundleId) {
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
+
     (async () => {
       try {
         setLoading(true);
@@ -180,8 +197,12 @@ export default function ApproveBundle() {
         const items = Array.isArray(res.items) ? res.items : [];
 
         const bundleItems = items.filter((src: TicketSummary) => {
-          const srcBundle = (src as any).bundleId;
-          return srcBundle && String(srcBundle) === bundleId;
+          const anySrc = src as any;
+          const rawBundle =
+            anySrc.bundleId ?? anySrc.bundle_id ?? null;
+          const srcBundle =
+            rawBundle != null ? String(rawBundle).trim() : "";
+          return srcBundle && srcBundle === bundleId;
         });
 
         if (!bundleItems.length) {
@@ -189,16 +210,22 @@ export default function ApproveBundle() {
         }
 
         const mapped = bundleItems.map(mapSummaryToUi);
-
         mapped.sort((a, b) => typeRank(a.type) - typeRank(b.type));
 
         if (!cancelled) {
           setTickets(mapped);
-          setCurrentIndex(0);
+          setCurrentIndex((prev) => {
+            if (prev < 0) return 0;
+            if (prev >= mapped.length) return mapped.length - 1;
+            return prev;
+          });
         }
       } catch (e: any) {
         if (!cancelled) {
           setError(e?.message || "Failed to load tickets");
+          if (!tickets.length && parsedItems.length) {
+            setTickets(parsedItems);
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -208,9 +235,10 @@ export default function ApproveBundle() {
     return () => {
       cancelled = true;
     };
-  }, [tickets.length, eventId, seasonId, bundleId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, seasonId, bundleId]);
 
-  // Clamp current index when ticket count changes
+  // Clamp index if tickets change
   useEffect(() => {
     if (!tickets.length) {
       setCurrentIndex(0);
@@ -223,12 +251,21 @@ export default function ApproveBundle() {
     });
   }, [tickets.length]);
 
+  // Reset zoom when changing ticket while modal is open
+  useEffect(() => {
+    if (zoomVisible) {
+      resetZoom();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, zoomVisible]);
+
   const bundleCount =
     tickets.length || (countParam ? parseInt(countParam, 10) || 0 : 0);
 
   const previewUrl =
     tickets.length > 0 ? tickets[currentIndex]?.url || "" : "";
   const hasMultiple = tickets.length > 1;
+  const hasPreview = !!previewUrl;
 
   const handlePrevTicket = () => {
     if (!hasMultiple) return;
@@ -246,7 +283,10 @@ export default function ApproveBundle() {
     });
   };
 
-  const goBackToTickets = () => router.back();
+  // 🔧 FIX: always pop one screen (scanner / tickets below)
+  const goBackToTickets = () => {
+    router.back();
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -256,7 +296,6 @@ export default function ApproveBundle() {
       </View>
 
       <View style={styles.content}>
-        {/* Scrollable content */}
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
@@ -283,15 +322,12 @@ export default function ApproveBundle() {
 
           {!loading && !!tickets.length && (
             <>
-              {/* PREVIEW BOX */}
+              {/* Ticket preview box */}
               <View style={styles.ticketBox}>
-                {previewUrl ? (
+                {hasPreview ? (
                   <>
                     <Pressable
-                      onPress={() => {
-                        resetZoom();
-                        setZoomVisible(true);
-                      }}
+                      onPress={openZoom}
                       style={styles.ticketPressable}
                     >
                       <View style={styles.ticketInnerShadow}>
@@ -349,7 +385,7 @@ export default function ApproveBundle() {
                 )}
               </View>
 
-              {/* CARD */}
+              {/* Confirmation card */}
               <View style={styles.card}>
                 <View style={styles.iconCircle}>
                   <Ionicons
@@ -400,24 +436,23 @@ export default function ApproveBundle() {
             onPress={goBackToTickets}
             style={[styles.cta, { backgroundColor: "#071689" }]}
           >
-            <Text style={styles.ctaText}>Back to Tickets</Text>
+            <Text style={styles.ctaText}>
+              {fromScanner ? "Scan next ticket" : "Back to Tickets"}
+            </Text>
           </Pressable>
         </View>
       </View>
 
-      {/* ZOOM MODAL */}
+      {/* Zoom modal */}
       <Modal
         visible={zoomVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setZoomVisible(false)}
+        onRequestClose={closeZoom}
       >
         <GestureHandlerRootView style={styles.modalBackdrop}>
           <View style={styles.modalHeader}>
-            <Pressable
-              onPress={() => setZoomVisible(false)}
-              style={styles.modalCloseBtn}
-            >
+            <Pressable onPress={closeZoom} style={styles.modalCloseBtn}>
               <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
             <Text style={styles.modalTitle}>Ticket Preview</Text>
@@ -426,7 +461,7 @@ export default function ApproveBundle() {
 
           <View style={styles.modalScroll}>
             <View style={styles.modalContent}>
-              {previewUrl && (
+              {hasPreview && (
                 <GestureDetector gesture={composedGesture}>
                   <Animated.View collapsable={false}>
                     <Animated.Image
@@ -471,12 +506,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
 
-  // new: scroll wrapper
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 32, // extra space so card isn't hidden behind button
+    paddingBottom: 32,
   },
 
   eventName: {
@@ -495,7 +529,6 @@ const styles = StyleSheet.create({
   muted: { color: "#6B7280" },
   errorText: { color: "#E53935", fontWeight: "700", textAlign: "center" },
 
-  // preview
   ticketBox: {
     width: "100%",
     borderRadius: 12,
@@ -622,7 +655,6 @@ const styles = StyleSheet.create({
   },
   ctaText: { color: "#fff", fontSize: 16, fontWeight: "700" },
 
-  // modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",

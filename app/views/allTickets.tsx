@@ -1,4 +1,3 @@
-// app/views/allTickets.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
@@ -12,13 +11,13 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi, type TicketSummary } from "@/lib/api";
@@ -333,6 +332,17 @@ export default function AllTickets() {
     const isAdultLike =
       item.type === "adult" || item.type === "priority" || !item.type;
 
+    const baseParams: any = {
+      eventId,
+      seasonId,
+      eventName,
+      ticketId: item.id,
+      code: item.code,
+      holderName: item.holderName,
+      side: item.sideLabel ?? item.sectionName ?? "",
+      status: item.status,
+    };
+
     if (item.status === "pending") {
       if (isChild && item.bundleId) {
         return;
@@ -361,17 +371,6 @@ export default function AllTickets() {
           return;
         }
       }
-
-      const baseParams: any = {
-        eventId,
-        seasonId,
-        eventName,
-        ticketId: item.id,
-        code: item.code,
-        holderName: item.holderName,
-        side: item.sideLabel ?? item.sectionName ?? "",
-        status: item.status,
-      };
 
       router.push({
         pathname: "/views/confirmReserved",
@@ -403,41 +402,37 @@ export default function AllTickets() {
       }
     }
 
-    if (isAdultLike && item.status === "active" && item.bundleId) {
-      const redeemableChildren = data.filter(
+    if (isAdultLike && item.bundleId) {
+      const attachedChildren = data.filter(
         (t) =>
           t.bundleId === item.bundleId &&
           t.type === "child" &&
-          t.status === "active" &&
           t.parentTicketId === item.id
       );
 
-      if (redeemableChildren.length > 0) {
-        const count = redeemableChildren.length;
-        const msg = `This ticket has ${count} child ticket${
-          count > 1 ? "s" : ""
-        }. Do you want to redeem only the adult ticket, or redeem the adult and all child tickets together?`;
+      const hasAttachedChildren = attachedChildren.length > 0;
+      const isBundleRelevantStatus =
+        item.status === "active" ||
+        item.status === "redeemed" ||
+        item.status === "invalid";
 
-        Alert.alert("Redeem tickets", msg, [
+      if (hasAttachedChildren && isBundleRelevantStatus) {
+        const count = attachedChildren.length;
+        const msg = `This adult ticket has ${count} child ticket${
+          count > 1 ? "s" : ""
+        }. Do you want to open only the adult ticket, or manage the adult and all child tickets together?`;
+
+        Alert.alert("Manage tickets", msg, [
           {
             text: "Adult only",
             onPress: () => {
-              const baseParams: any = {
-                eventId,
-                seasonId,
-                eventName,
-                ticketId: item.id,
-                code: item.code,
-                holderName: item.holderName,
-                side: item.sideLabel ?? item.sectionName ?? "",
-                status: item.status,
-              };
-
               router.push({
                 pathname: "/views/confirmTicket",
                 params: {
                   ...baseParams,
                   mode: "list",
+                  bundleId: item.bundleId!,
+                  parentTicketId: item.id,
                 },
               });
             },
@@ -451,7 +446,8 @@ export default function AllTickets() {
                   eventId,
                   seasonId,
                   eventName,
-                  bundleId: item.bundleId,
+                  bundleId: item.bundleId!,
+                  parentTicketId: item.id,
                   mode: "bundle",
                   status: item.status,
                 },
@@ -463,17 +459,6 @@ export default function AllTickets() {
         return;
       }
     }
-
-    const baseParams: any = {
-      eventId,
-      seasonId,
-      eventName,
-      ticketId: item.id,
-      code: item.code,
-      holderName: item.holderName,
-      side: item.sideLabel ?? item.sectionName ?? "",
-      status: item.status,
-    };
 
     if (item.status === "expired") {
       router.push({
@@ -568,24 +553,17 @@ export default function AllTickets() {
           onPress={() => handlePressBundle(row)}
         >
           <View style={styles.leftCol}>
-            <Text style={styles.name}>
-              {row.primaryName || "Bundle"}
-            </Text>
-            <Text style={styles.code}>
-              {row.count} tickets in bundle
-            </Text>
-            {typeof row.priceTotal === "number" &&
-              row.priceTotal > 0 && (
-                <Text style={styles.bundleTotal}>
-                  Total: ₱{row.priceTotal.toFixed(2)}
-                </Text>
-              )}
+            <Text style={styles.name}>{row.primaryName || "Bundle"}</Text>
+            <Text style={styles.code}>{row.count} tickets in bundle</Text>
+            {typeof row.priceTotal === "number" && row.priceTotal > 0 && (
+              <Text style={styles.bundleTotal}>
+                Total: ₱{row.priceTotal.toFixed(2)}
+              </Text>
+            )}
           </View>
 
           <View style={styles.rightRail}>
-            {row.allSameStatus && (
-              <StatusBadge status={row.status} />
-            )}
+            {row.allSameStatus && <StatusBadge status={row.status} />}
             <Pressable
               hitSlop={8}
               onPress={(event) => {
@@ -820,7 +798,6 @@ function FilterChip({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F9FAFB" },
-
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -841,7 +818,6 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: "#E5E7EB",
   },
-
   searchRow: {
     flexDirection: "row",
     gap: 10,
@@ -875,7 +851,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-
   filterRow: {
     flexDirection: "row",
     gap: 8,
@@ -896,7 +871,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   chipText: { color: "#111", fontSize: 13 },
-
   clearBtn: {
     marginLeft: "auto",
     paddingHorizontal: 8,
@@ -905,7 +879,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   clearText: { color: "#6B7280", fontSize: 13 },
-
   errorBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -914,7 +887,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   errorText: { color: "#DC2626", fontSize: 13 },
-
   loadingRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -923,9 +895,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   loadingText: { fontSize: 13, color: "#4B5563" },
-
   listContent: { padding: 12, paddingTop: 6 },
-
   card: {
     flexDirection: "row",
     alignItems: "center",
@@ -941,17 +911,13 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
-
   leftCol: { flex: 1, justifyContent: "center" },
-
   rightRail: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
-
   sep: { height: 8 },
-
   name: { fontSize: 15, fontWeight: "700", color: "#111" },
   code: {
     fontSize: 12,
@@ -971,7 +937,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: "600",
   },
-
   badge: {
     paddingHorizontal: 10,
     height: 24,
@@ -985,7 +950,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.2,
   },
-
   bundleChildren: {
     marginTop: 4,
     marginLeft: 10,
@@ -1025,7 +989,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 2,
   },
-
   empty: {
     flex: 1,
     alignItems: "center",

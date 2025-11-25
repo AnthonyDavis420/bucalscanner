@@ -1,4 +1,3 @@
-// app/views/confirmTicket.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
@@ -70,6 +69,7 @@ export default function ConfirmTicket() {
     eventId?: string;
     seasonId?: string;
     bundleId?: string;
+    parentTicketId?: string;
   }>();
 
   const rawMode = Array.isArray(params.mode) ? params.mode[0] : params.mode;
@@ -133,11 +133,15 @@ export default function ConfirmTicket() {
   const rawBundleIdParam = Array.isArray(params.bundleId)
     ? params.bundleId[0]
     : params.bundleId;
+  const rawParentTicketIdParam = Array.isArray(params.parentTicketId)
+    ? params.parentTicketId[0]
+    : params.parentTicketId;
 
   const eventIdFromParams = (rawEventIdParam || "").trim();
   const seasonIdFromParams = (rawSeasonIdParam || "").trim();
   const ticketIdFromParams = (rawTicketIdParam || "").trim();
   const bundleId = (rawBundleIdParam || "").trim();
+  const parentTicketIdFromParams = (rawParentTicketIdParam || "").trim();
 
   const fallbackEventName = rawEventName || "Event Ticket";
   const fallbackHolder = rawHolder || "John Doe";
@@ -167,9 +171,21 @@ export default function ConfirmTicket() {
             []
           );
           const items = Array.isArray(res.items) ? res.items : [];
+
           const bundleItems = items.filter((src: TicketSummary) => {
             const srcBundle = (src as any).bundleId;
-            return srcBundle && String(srcBundle) === bundleId;
+            if (!srcBundle || String(srcBundle) !== bundleId) return false;
+
+            if (!parentTicketIdFromParams) return true;
+
+            const srcId = src.id;
+            const srcParent = (src as any).parentTicketId ?? null;
+
+            if (srcId === parentTicketIdFromParams) return true;
+            if (srcParent && String(srcParent) === parentTicketIdFromParams)
+              return true;
+
+            return false;
           });
 
           if (!bundleItems.length) {
@@ -322,6 +338,7 @@ export default function ConfirmTicket() {
     seasonIdFromParams,
     ticketIdFromParams,
     bundleId,
+    parentTicketIdFromParams,
   ]);
 
   useEffect(() => {
@@ -366,6 +383,78 @@ export default function ConfirmTicket() {
     seasonIdFromParams,
   ]);
 
+  useEffect(() => {
+    if (isBundleMode) return;
+    if (!fromAllTickets) return;
+    if (!bundleId) return;
+    if (!ticket) return;
+
+    const rawTypeFromTicket = ticket?.type as string | undefined;
+    const normalized =
+      rawTypeFromTicket?.toString().toLowerCase() as
+        | "adult"
+        | "child"
+        | "priority"
+        | undefined;
+
+    const isParent =
+      normalized === "adult" || normalized === "priority";
+
+    if (!isParent) return;
+    if (!eventIdFromParams || !seasonIdFromParams) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await scannerApi.fetchTickets(
+          eventIdFromParams,
+          seasonIdFromParams,
+          []
+        );
+        const items = Array.isArray(res.items) ? res.items : [];
+        const bundleItems = items.filter((src: TicketSummary) => {
+          const srcBundle = (src as any).bundleId;
+          if (!srcBundle || String(srcBundle) !== bundleId) return false;
+
+          if (!parentTicketIdFromParams) return true;
+
+          const srcId = src.id;
+          const srcParent = (src as any).parentTicketId ?? null;
+
+          if (srcId === parentTicketIdFromParams) return true;
+          if (srcParent && String(srcParent) === parentTicketIdFromParams)
+            return true;
+
+          return false;
+        });
+
+        if (!cancelled && bundleItems.length) {
+          const sorted = [...bundleItems].sort((a, b) => {
+            const ta = (a as any).type as TicketType | undefined;
+            const tb = (b as any).type as TicketType | undefined;
+            return typeRank(ta) - typeRank(tb);
+          });
+          setBundleTickets(sorted as BundleTicket[]);
+        }
+      } catch (e) {
+      } finally {
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isBundleMode,
+    fromAllTickets,
+    bundleId,
+    ticket,
+    eventIdFromParams,
+    seasonIdFromParams,
+    parentTicketIdFromParams,
+  ]);
+
   const holderFromTicket = ticket?.assignedName;
   const sideFromTicket =
     ticket && (ticket.sectionName || ticket.sideLabel)
@@ -399,6 +488,14 @@ export default function ConfirmTicket() {
 
   const ticketImageUrl = imageFromTicket || fallbackTicketUrl || null;
 
+  const isParentType =
+    normalizedType === "adult" || normalizedType === "priority";
+  const eventIdEffective =
+    eventIdFromParams || (ctx?.eventId ?? "");
+  const seasonIdEffective =
+    seasonIdFromParams || (ctx?.seasonId ?? "");
+  const hasBundleGroup = bundleTickets.length > 0 && !!bundleId;
+
   const header = useMemo(() => {
     if (isCreateMode) {
       return { text: "Ticket is Created!", color: "#071689" };
@@ -422,8 +519,91 @@ export default function ConfirmTicket() {
   const handleUpdateStatus = async (nextStatus: "redeemed" | "invalid") => {
     if (actionBusy) return;
 
-    if (!ticket || !ctx) {
+    if (!ticket) {
       setStatus(nextStatus);
+      return;
+    }
+
+    if (
+      nextStatus === "invalid" &&
+      isParentType &&
+      hasBundleGroup &&
+      eventIdEffective &&
+      seasonIdEffective
+    ) {
+      try {
+        setActionBusy(true);
+        const childTickets = bundleTickets.filter((t) => {
+          const tType = (t.type as string | undefined)?.toLowerCase();
+          return tType === "child";
+        });
+        const allToUpdate: BundleTicket[] = [
+          ticket as BundleTicket,
+          ...childTickets,
+        ];
+        await Promise.all(
+          allToUpdate.map((t) =>
+            scannerApi.updateTicketStatus(
+              eventIdEffective,
+              seasonIdEffective,
+              t.id,
+              "invalid"
+            )
+          )
+        );
+        setStatus("invalid");
+        setTicket((prev) =>
+          prev ? ({ ...prev, status: "invalid" } as TicketSummary) : prev
+        );
+        setBundleTickets((prev) =>
+          prev.map((t) =>
+            allToUpdate.some((u) => u.id === t.id)
+              ? ({ ...t, status: "invalid" } as BundleTicket)
+              : t
+          )
+        );
+      } catch (e: any) {
+        Alert.alert(
+          "Update failed",
+          e?.message || "Could not update ticket status. Please try again."
+        );
+      } finally {
+        setActionBusy(false);
+      }
+      return;
+    }
+
+    if (!ctx) {
+      setStatus(nextStatus);
+      setTicket((prev) =>
+        prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
+      );
+      if (hasBundleGroup) {
+        const isParent = isParentType && bundleTickets.length > 0;
+        if (nextStatus === "invalid" && isParent) {
+          const childIds = bundleTickets
+            .filter((t) => {
+              const tType = (t.type as string | undefined)?.toLowerCase();
+              return tType === "child";
+            })
+            .map((t) => t.id);
+          setBundleTickets((prev) =>
+            prev.map((t) =>
+              t.id === ticket.id || childIds.includes(t.id)
+                ? ({ ...t, status: nextStatus } as BundleTicket)
+                : t
+            )
+          );
+        } else {
+          setBundleTickets((prev) =>
+            prev.map((t) =>
+              t.id === ticket.id
+                ? ({ ...t, status: nextStatus } as BundleTicket)
+                : t
+            )
+          );
+        }
+      }
       return;
     }
 
@@ -442,7 +622,9 @@ export default function ConfirmTicket() {
       if (isBundleMode) {
         setBundleTickets((prev) =>
           prev.map((t) =>
-            t.id === ticket.id ? ({ ...t, status: nextStatus } as BundleTicket) : t
+            t.id === ticket.id
+              ? ({ ...t, status: nextStatus } as BundleTicket)
+              : t
           )
         );
       }
@@ -459,8 +641,126 @@ export default function ConfirmTicket() {
   const handleUndoToActive = async () => {
     if (actionBusy) return;
 
-    if (!ticket || !ctx) {
+    if (!ticket) {
       setStatus("active");
+      return;
+    }
+
+    if (hasBundleGroup) {
+      const baseStatus = String(
+        (bundleTickets[0] as any).status || ""
+      ).toLowerCase();
+      const allSame = bundleTickets.every(
+        (t) => String((t as any).status || "").toLowerCase() === baseStatus
+      );
+      const eligible =
+        baseStatus === "redeemed" || baseStatus === "invalid";
+
+      if (allSame && eligible && eventIdEffective && seasonIdEffective) {
+        try {
+          setActionBusy(true);
+          await Promise.all(
+            bundleTickets.map((t) =>
+              scannerApi.updateTicketStatus(
+                eventIdEffective,
+                seasonIdEffective,
+                t.id,
+                "active"
+              )
+            )
+          );
+          setStatus("active");
+          setTicket((prev) =>
+            prev ? ({ ...prev, status: "active" } as TicketSummary) : prev
+          );
+          setBundleTickets((prev) =>
+            prev.map((t) => ({ ...t, status: "active" } as BundleTicket))
+          );
+        } catch (e: any) {
+          Alert.alert(
+            "Undo failed",
+            e?.message ||
+              "Could not revert tickets to active. Please try again."
+          );
+        } finally {
+          setActionBusy(false);
+        }
+        return;
+      }
+    }
+
+    if (hasBundleGroup && isParentType && eventIdEffective && seasonIdEffective) {
+      try {
+        setActionBusy(true);
+        const related = bundleTickets.filter((t) => {
+          if (t.id === ticket.id) return true;
+          const tType = (t.type as string | undefined)?.toLowerCase();
+          return tType === "child";
+        });
+        await Promise.all(
+          related.map((t) =>
+            scannerApi.updateTicketStatus(
+              eventIdEffective,
+              seasonIdEffective,
+              t.id,
+              "active"
+            )
+          )
+        );
+        setStatus("active");
+        setTicket((prev) =>
+          prev ? ({ ...prev, status: "active" } as TicketSummary) : prev
+        );
+        setBundleTickets((prev) =>
+          prev.map((t) =>
+            related.some((r) => r.id === t.id)
+              ? ({ ...t, status: "active" } as BundleTicket)
+              : t
+          )
+        );
+      } catch (e: any) {
+        Alert.alert(
+          "Undo failed",
+          e?.message ||
+            "Could not revert tickets to active. Please try again."
+        );
+      } finally {
+        setActionBusy(false);
+      }
+      return;
+    }
+
+    if (!ctx) {
+      setStatus("active");
+      setTicket((prev) =>
+        prev ? ({ ...prev, status: "active" } as TicketSummary) : prev
+      );
+      if (hasBundleGroup) {
+        const isParent = isParentType && bundleTickets.length > 0;
+        if (isParent) {
+          const childIds = bundleTickets
+            .filter((t) => {
+              const tType = (t.type as string | undefined)?.toLowerCase();
+              return tType === "child";
+            })
+            .map((t) => t.id);
+          setBundleTickets((prev) =>
+            prev.map((t) =>
+              t.id === ticket.id || childIds.includes(t.id)
+                ? ({ ...t, status: "active" } as BundleTicket)
+                : t
+            )
+          );
+        } else {
+          setBundleTickets((prev) =>
+            prev.map((t) =>
+              t.id === ticket.id
+                ? ({ ...t, status: "active" } as BundleTicket)
+                : t
+            )
+          );
+        }
+      }
       return;
     }
 
@@ -479,7 +779,9 @@ export default function ConfirmTicket() {
       if (isBundleMode) {
         setBundleTickets((prev) =>
           prev.map((t) =>
-            t.id === ticket.id ? ({ ...t, status: "active" } as BundleTicket) : t
+            t.id === ticket.id
+              ? ({ ...t, status: "active" } as BundleTicket)
+              : t
           )
         );
       }
@@ -493,7 +795,65 @@ export default function ConfirmTicket() {
     }
   };
 
-  const handleRedeem = () => void handleUpdateStatus("redeemed");
+  const handleRedeemAll = async () => {
+    if (actionBusy || !isBundleMode) return;
+
+    const eventId = eventIdFromParams || ctx?.eventId || "";
+    const seasonId = seasonIdFromParams || ctx?.seasonId || "";
+
+    if (!eventId || !seasonId || !bundleTickets.length) {
+      Alert.alert(
+        "Cannot redeem bundle",
+        "Missing bundle information. Please try again."
+      );
+      return;
+    }
+
+    const redeemable = bundleTickets.filter(
+      (t) => String((t as any).status || "").toLowerCase() === "active"
+    );
+
+    if (!redeemable.length) {
+      Alert.alert(
+        "Nothing to redeem",
+        "All tickets in this group have already been updated."
+      );
+      return;
+    }
+
+    try {
+      setActionBusy(true);
+      await Promise.all(
+        redeemable.map((t) =>
+          scannerApi.updateTicketStatus(eventId, seasonId, t.id, "redeemed")
+        )
+      );
+      setStatus("redeemed");
+      setTicket((prev) =>
+        prev ? ({ ...prev, status: "redeemed" } as TicketSummary) : prev
+      );
+      setBundleTickets((prev) =>
+        prev.map((t) =>
+          redeemable.some((r) => r.id === t.id)
+            ? ({ ...t, status: "redeemed" } as BundleTicket)
+            : t
+        )
+      );
+    } catch (e: any) {
+      Alert.alert(
+        "Update failed",
+        e?.message ||
+          "Could not redeem all tickets in this group. Please try again."
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleRedeem = () => {
+    handleUpdateStatus("redeemed");
+  };
+
   const handleInvalidate = () => void handleUpdateStatus("invalid");
 
   const goBackToTickets = () => router.back();
@@ -764,34 +1124,59 @@ export default function ConfirmTicket() {
             )}
 
             {!isCreateMode && status === "active" && (
-              <View style={styles.row}>
-                <Pressable
-                  onPress={handleInvalidate}
-                  disabled={actionBusy}
-                  style={[
-                    styles.cta,
-                    {
-                      backgroundColor: "#E53935",
-                      opacity: actionBusy ? 0.75 : 1,
-                    },
-                  ]}
-                >
-                  <Text style={styles.ctaText}>Invalid</Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleRedeem}
-                  disabled={actionBusy}
-                  style={[
-                    styles.cta,
-                    {
-                      backgroundColor: "#071689",
-                      opacity: actionBusy ? 0.75 : 1,
-                    },
-                  ]}
-                >
-                  <Text style={styles.ctaText}>Redeem</Text>
-                </Pressable>
-              </View>
+              <>
+                <View style={styles.row}>
+                  <Pressable
+                    onPress={handleInvalidate}
+                    disabled={actionBusy}
+                    style={[
+                      styles.cta,
+                      {
+                        backgroundColor: "#E53935",
+                        opacity: actionBusy ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.ctaText}>Invalid</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleRedeem}
+                    disabled={actionBusy}
+                    style={[
+                      styles.cta,
+                      {
+                        backgroundColor: "#071689",
+                        opacity: actionBusy ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.ctaText}>Redeem</Text>
+                  </Pressable>
+                </View>
+
+                {isBundleMode && bundleTickets.length > 1 && (
+                  <View
+                    style={[
+                      styles.row,
+                      { marginTop: 4, marginBottom: 24, paddingHorizontal: 8 },
+                    ]}
+                  >
+                    <Pressable
+                      onPress={handleRedeemAll}
+                      disabled={actionBusy}
+                      style={[
+                        styles.cta,
+                        {
+                          backgroundColor: "#16A34A",
+                          opacity: actionBusy ? 0.75 : 1,
+                        },
+                      ]}
+                    >
+                      <Text style={styles.ctaText}>Redeem All</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </>
             )}
 
             {!isCreateMode &&
@@ -816,10 +1201,14 @@ export default function ConfirmTicket() {
                   <Pressable
                     onPress={handleUndoToActive}
                     disabled={actionBusy}
-                    style={[styles.cta, styles.ghost]}
+                    style={[
+                      styles.cta,
+                      styles.ghost,
+                      actionBusy && { opacity: 0.7 },
+                    ]}
                   >
                     <Text style={[styles.ctaText, { color: "#111" }]}>
-                      Revert Changes
+                      {actionBusy ? "Reverting..." : "Revert Changes"}
                     </Text>
                   </Pressable>
 

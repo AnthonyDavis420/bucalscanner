@@ -1,19 +1,29 @@
+// app/views/confirmReserved.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
-  Image,
+  Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi, type TicketSummary } from "../../lib/api";
-
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 type UITicket = {
   id: string;
@@ -30,9 +40,9 @@ function asString(v: string | string[] | undefined, fallback = "") {
 
 function mapSummaryToUi(s: TicketSummary): UITicket {
   const imageUrl =
-    ((s as any)?.ticketUrl ||
+    ((s as any)?.ticket?.ticketUrl ||
+      (s as any)?.ticketUrl ||
       (s as any)?.url ||
-      (s as any)?.ticket?.ticketUrl ||
       "") as string;
 
   return {
@@ -56,6 +66,7 @@ export default function ConfirmReserved() {
     side?: string | string[];
     totalAmount?: string | string[];
     refNumber?: string | string[];
+    source?: string | string[]; // 👈 NEW
   }>();
 
   const eventId = asString(params.eventId, "");
@@ -68,6 +79,7 @@ export default function ConfirmReserved() {
   const sideParam = asString(params.side, "");
   const totalAmountParam = asString(params.totalAmount, "");
   const refNumberParam = asString(params.refNumber, "");
+  const source = asString(params.source, "tickets"); // 👈 NEW
 
   const [loading, setLoading] = useState(true);
   const [finalizing, setFinalizing] = useState(false);
@@ -75,6 +87,58 @@ export default function ConfirmReserved() {
   const [ticket, setTicket] = useState<UITicket | null>(null);
 
   const hasLoaded = useRef(false);
+
+  // zoom state
+  const [zoomVisible, setZoomVisible] = useState(false);
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const pinch = Gesture.Pinch()
+    .onStart(() => {
+      savedScale.value = scale.value;
+    })
+    .onUpdate((e) => {
+      scale.value = savedScale.value * e.scale;
+    })
+    .onEnd(() => {
+      if (scale.value < 1) {
+        scale.value = withTiming(1);
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+      } else if (scale.value > 4) {
+        scale.value = withTiming(4);
+      }
+    });
+
+  const pan = Gesture.Pan()
+    .onStart(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    })
+    .onUpdate((e) => {
+      translateX.value = savedTranslateX.value + e.translationX;
+      translateY.value = savedTranslateY.value + e.translationY;
+    });
+
+  const composedGesture = Gesture.Simultaneous(pinch, pan);
+
+  const animatedImageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  const resetZoom = () => {
+    scale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+  };
 
   useEffect(() => {
     if (hasLoaded.current) return;
@@ -84,12 +148,27 @@ export default function ConfirmReserved() {
 
     const loadTicket = async () => {
       try {
-        if (!eventId || !seasonId || !ticketId) {
-          throw new Error("Missing event/ticket context");
-        }
         setLoading(true);
         setError(null);
 
+        // Fallback mode – use route params only
+        if (!eventId || !seasonId || !ticketId) {
+          const fallback: UITicket = {
+            id: ticketId || refNumberParam || "unknown",
+            url: ticketUrlParam || "",
+            seatLabel: guestNameParam || "Guest",
+            seatDetail: `${sectionParam || "Section"} · ${
+              sideParam || "Side"
+            }`,
+            price: totalAmountParam ? Number(totalAmountParam) || null : null,
+          };
+          if (!cancelled) {
+            setTicket(fallback);
+          }
+          return;
+        }
+
+        // Full-context mode – fetch from API for real preview
         const res = await scannerApi.fetchTickets(eventId, seasonId, [ticketId]);
         const first = Array.isArray(res.items) ? res.items[0] : undefined;
 
@@ -98,6 +177,7 @@ export default function ConfirmReserved() {
         if (first) {
           setTicket(mapSummaryToUi(first));
         } else {
+          // API returned nothing, still show something based on params
           setTicket({
             id: ticketId,
             url: ticketUrlParam || "",
@@ -112,10 +192,12 @@ export default function ConfirmReserved() {
         if (cancelled) return;
 
         setTicket({
-          id: ticketId || "unknown",
+          id: ticketId || refNumberParam || "unknown",
           url: ticketUrlParam || "",
           seatLabel: guestNameParam || "Guest",
-          seatDetail: `${sectionParam || "Section"} · ${sideParam || "Side"}`,
+          seatDetail: `${sectionParam || "Section"} · ${
+            sideParam || "Side"
+          }`,
           price: totalAmountParam ? Number(totalAmountParam) || null : null,
         });
         setError(e?.message || "Failed to load ticket");
@@ -140,6 +222,7 @@ export default function ConfirmReserved() {
     sectionParam,
     sideParam,
     totalAmountParam,
+    refNumberParam,
   ]);
 
   const handleTopBack = () => {
@@ -170,6 +253,7 @@ export default function ConfirmReserved() {
             totalAmountParam ||
             (ticket.price != null ? String(ticket.price) : ""),
           refNumber: refNumberParam || ticket.id,
+          source, // 👈 forward where we came from
         },
       });
     } catch (e: any) {
@@ -178,13 +262,23 @@ export default function ConfirmReserved() {
     }
   };
 
+  // Amount formatting similar to bundle: always show as ₱X.XX if numeric
+  let amountValue: number | null = null;
+  if (totalAmountParam) {
+    const n = Number(totalAmountParam);
+    if (!Number.isNaN(n)) amountValue = n;
+  } else if (ticket?.price != null) {
+    amountValue = ticket.price;
+  }
   const amountLabel =
-    totalAmountParam ||
-    (ticket?.price != null ? `₱${ticket.price.toFixed(2)}` : "");
+    amountValue != null ? `₱${amountValue.toFixed(2)}` : "";
+
+  const confirmDisabled = loading || !ticket || finalizing;
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
+        {/* header */}
         <View style={styles.headerRow}>
           <Pressable
             onPress={handleTopBack}
@@ -197,7 +291,11 @@ export default function ConfirmReserved() {
           <View style={{ width: 22 }} />
         </View>
 
-        <View style={{ flex: 1, paddingHorizontal: 20 }}>
+        {/* MAIN SCROLL */}
+        <ScrollView
+          style={styles.pageScroll}
+          contentContainerStyle={styles.pageScrollContent}
+        >
           {!!eventName && (
             <Text style={styles.eventName} numberOfLines={2}>
               {eventName}
@@ -219,20 +317,37 @@ export default function ConfirmReserved() {
 
           {!loading && ticket && (
             <>
+              {/* PREVIEW BOX (tap to zoom) */}
               <View style={styles.ticketBox}>
                 {ticket.url ? (
-                  <Image
-                    source={{ uri: ticket.url }}
-                    style={styles.ticketImage}
-                    resizeMode="contain"
-                  />
+                  <>
+                    <Pressable
+                      onPress={() => {
+                        resetZoom();
+                        setZoomVisible(true);
+                      }}
+                      style={styles.ticketPressable}
+                    >
+                      <View style={styles.ticketInnerShadow}>
+                        <Image
+                          source={{ uri: ticket.url }}
+                          style={styles.ticketImage}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    </Pressable>
+                    <Text style={styles.tapHint}>Tap ticket to zoom</Text>
+                  </>
                 ) : (
-                  <View style={styles.noImageBox}>
-                    <Text style={styles.muted}>No preview available</Text>
+                  <View style={styles.ticketPlaceholder}>
+                    <Text style={styles.placeholderText}>
+                      Ticket image not available
+                    </Text>
                   </View>
                 )}
               </View>
 
+              {/* RESERVATION SUMMARY */}
               <View style={styles.infoCard}>
                 <Text style={styles.infoTitle}>Reservation Details</Text>
 
@@ -246,17 +361,17 @@ export default function ConfirmReserved() {
                   <Text style={styles.infoValue}>{ticket.seatDetail}</Text>
                 </View>
 
-                {!!amountLabel && (
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>Amount</Text>
-                    <Text style={styles.infoValue}>{amountLabel}</Text>
-                  </View>
-                )}
-
                 {!!refNumberParam && (
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>Reference</Text>
                     <Text style={styles.infoValue}>{refNumberParam}</Text>
+                  </View>
+                )}
+
+                {!!amountLabel && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Amount</Text>
+                    <Text style={styles.infoValue}>{amountLabel}</Text>
                   </View>
                 )}
 
@@ -266,18 +381,17 @@ export default function ConfirmReserved() {
               </View>
             </>
           )}
-        </View>
+        </ScrollView>
       </View>
 
+      {/* footer */}
       <View style={styles.footer}>
         <Pressable
           onPress={handleConfirmPayment}
-          disabled={loading || !ticket || finalizing}
+          disabled={confirmDisabled}
           style={[
             styles.confirmBtn,
-            (loading || !ticket || finalizing) && {
-              backgroundColor: "#9CA3AF",
-            },
+            confirmDisabled && { backgroundColor: "#9CA3AF" },
           ]}
         >
           <Text style={styles.confirmText}>
@@ -285,6 +399,43 @@ export default function ConfirmReserved() {
           </Text>
         </Pressable>
       </View>
+
+      {/* ZOOM MODAL */}
+      <Modal
+        visible={zoomVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setZoomVisible(false)}
+      >
+        <GestureHandlerRootView style={styles.modalBackdrop}>
+          <View style={styles.modalHeader}>
+            <Pressable
+              onPress={() => setZoomVisible(false)}
+              style={styles.modalCloseBtn}
+            >
+              <Ionicons name="close" size={22} color="#fff" />
+            </Pressable>
+            <Text style={styles.modalTitle}>Ticket Preview</Text>
+            <View style={{ width: 22 }} />
+          </View>
+
+          <View style={styles.modalScroll}>
+            <View style={styles.modalContent}>
+              {ticket?.url && (
+                <GestureDetector gesture={composedGesture}>
+                  <Animated.View collapsable={false}>
+                    <Animated.Image
+                      source={{ uri: ticket.url }}
+                      style={[styles.modalImage, animatedImageStyle]}
+                      resizeMode="contain"
+                    />
+                  </Animated.View>
+                </GestureDetector>
+              )}
+            </View>
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -292,6 +443,7 @@ export default function ConfirmReserved() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#FFFFFF" },
   container: { flex: 1, paddingTop: 12 },
+
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -307,6 +459,15 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
   },
+
+  pageScroll: {
+    flex: 1,
+  },
+  pageScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 60,
+  },
+
   eventName: {
     fontSize: 14,
     fontWeight: "700",
@@ -314,6 +475,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 12,
   },
+
   centerBox: {
     padding: 24,
     alignItems: "center",
@@ -321,29 +483,49 @@ const styles = StyleSheet.create({
   },
   muted: { color: "#6B7280" },
   errorText: { color: "#E53935", fontWeight: "700", textAlign: "center" },
+
+  // preview box (mirrors bundle style)
   ticketBox: {
     width: "100%",
     borderRadius: 12,
     overflow: "hidden",
     marginTop: 4,
-    marginBottom: 20,
+    marginBottom: 16,
     backgroundColor: "#F9FAFB",
     borderWidth: 1,
     borderColor: "#E5E7EB",
+  },
+  ticketPressable: {
+    width: "100%",
+  },
+  ticketInnerShadow: {
+    padding: 8,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: SCREEN_HEIGHT * 0.35,
   },
   ticketImage: {
     width: "100%",
-    height: SCREEN_HEIGHT * 0.4,
+    aspectRatio: 3 / 2,
+    borderRadius: 10,
   },
-  noImageBox: {
+  tapHint: {
+    fontSize: 12,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingBottom: 8,
+  },
+  ticketPlaceholder: {
     width: "100%",
-    height: SCREEN_HEIGHT * 0.4,
+    paddingVertical: 40,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#F9FAFB",
   },
+  placeholderText: {
+    fontSize: 13,
+    color: "#9CA3AF",
+  },
+
   infoCard: {
     borderRadius: 16,
     backgroundColor: "#F3F4FF",
@@ -377,6 +559,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#4B5563",
   },
+
   footer: {
     position: "absolute",
     left: 0,
@@ -405,5 +588,43 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+  },
+
+  // modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.85)",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: 40,
+    paddingBottom: 12,
+  },
+  modalCloseBtn: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  modalTitle: {
+    flex: 1,
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  modalScroll: {
+    flex: 1,
+  },
+  modalContent: {
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  modalImage: {
+    width: "100%",
+    aspectRatio: 3 / 2,
   },
 });

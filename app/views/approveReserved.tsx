@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -9,6 +9,7 @@ import {
   Image,
   Modal,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -21,6 +22,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+import { scannerApi, type TicketSummary } from "../../lib/api";
 
 function asString(v: string | string[] | undefined, fallback = "") {
   if (Array.isArray(v)) return v[0] ?? fallback;
@@ -39,17 +41,27 @@ export default function ApproveReserved() {
     side?: string | string[];
     amountPaid?: string | string[];
     refNumber?: string | string[];
+    source?: string | string[];
   }>();
 
+  const eventId = asString(params.eventId, "");
+  const seasonId = asString(params.seasonId, "");
+  const ticketId = asString(params.ticketId, "");
+
   const eventName = asString(params.eventName, "");
-  const ticketUrl = asString(params.ticketUrl, "");
+  const ticketUrlParam = asString(params.ticketUrl, "");
   const holderName = asString(params.holderName, "");
   const section = asString(params.section, "");
   const side = asString(params.side, "");
   const amountPaid = asString(params.amountPaid, "");
   const refNumber = asString(params.refNumber, "");
+  const source = asString(params.source, "tickets");
+  const fromScanner = source === "scanner";
 
   const [zoomVisible, setZoomVisible] = useState(false);
+  const [resolvedTicketUrl, setResolvedTicketUrl] =
+    useState<string>(ticketUrlParam);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -95,13 +107,73 @@ export default function ApproveReserved() {
     ],
   }));
 
-  const goBackToTickets = () => router.back();
+  // 🔧 FIX: always just go back one screen (to existing Scanner or Tickets)
+  const goBackToTickets = () => {
+    router.back();
+  };
 
   const resetZoom = () => {
     scale.value = 1;
     translateX.value = 0;
     translateY.value = 0;
   };
+
+  const openZoom = () => {
+    resetZoom();
+    setZoomVisible(true);
+  };
+
+  const closeZoom = () => {
+    setZoomVisible(false);
+    resetZoom();
+  };
+
+  // 🔁 Re-fetch the ticket to get a reliable preview URL
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!eventId || !seasonId || !ticketId) {
+      setResolvedTicketUrl(ticketUrlParam);
+      return;
+    }
+
+    (async () => {
+      try {
+        setPreviewLoading(true);
+        const res = await scannerApi.fetchTickets(eventId, seasonId, [
+          ticketId,
+        ]);
+        const first = Array.isArray(res.items)
+          ? (res.items[0] as TicketSummary | undefined)
+          : undefined;
+
+        const anyFirst = first as any;
+        const apiUrl =
+          (anyFirst?.ticket?.ticketUrl ||
+            anyFirst?.ticketUrl ||
+            anyFirst?.url ||
+            "") as string;
+
+        if (!cancelled) {
+          setResolvedTicketUrl(apiUrl || ticketUrlParam || "");
+        }
+      } catch {
+        if (!cancelled) {
+          setResolvedTicketUrl(ticketUrlParam || "");
+        }
+      } finally {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, seasonId, ticketId, ticketUrlParam]);
+
+  const hasPreview = !!resolvedTicketUrl;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -114,6 +186,7 @@ export default function ApproveReserved() {
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
           {!!eventName && (
             <Text style={styles.eventName} numberOfLines={2}>
@@ -121,19 +194,21 @@ export default function ApproveReserved() {
             </Text>
           )}
 
+          {/* Ticket preview box */}
           <View style={styles.ticketBox}>
-            {ticketUrl ? (
+            {previewLoading && !hasPreview ? (
+              <View style={styles.ticketPlaceholder}>
+                <ActivityIndicator />
+                <Text style={[styles.placeholderText, { marginTop: 8 }]}>
+                  Loading ticket…
+                </Text>
+              </View>
+            ) : hasPreview ? (
               <>
-                <Pressable
-                  onPress={() => {
-                    resetZoom();
-                    setZoomVisible(true);
-                  }}
-                  style={styles.ticketPressable}
-                >
+                <Pressable onPress={openZoom} style={styles.ticketPressable}>
                   <View style={styles.ticketInnerShadow}>
                     <Image
-                      source={{ uri: ticketUrl }}
+                      source={{ uri: resolvedTicketUrl }}
                       style={styles.ticketImage}
                       resizeMode="contain"
                     />
@@ -150,6 +225,7 @@ export default function ApproveReserved() {
             )}
           </View>
 
+          {/* Info card */}
           <View style={styles.card}>
             <View style={styles.iconCircle}>
               <Ionicons name="checkmark-circle" size={48} color="#071689" />
@@ -199,23 +275,23 @@ export default function ApproveReserved() {
             onPress={goBackToTickets}
             style={[styles.cta, { backgroundColor: "#071689" }]}
           >
-            <Text style={styles.ctaText}>Back to Tickets</Text>
+            <Text style={styles.ctaText}>
+              {fromScanner ? "Scan next ticket" : "Back to Tickets"}
+            </Text>
           </Pressable>
         </View>
       </View>
 
+      {/* Zoom modal */}
       <Modal
         visible={zoomVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setZoomVisible(false)}
+        onRequestClose={closeZoom}
       >
         <GestureHandlerRootView style={styles.modalBackdrop}>
           <View style={styles.modalHeader}>
-            <Pressable
-              onPress={() => setZoomVisible(false)}
-              style={styles.modalCloseBtn}
-            >
+            <Pressable onPress={closeZoom} style={styles.modalCloseBtn}>
               <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
             <Text style={styles.modalTitle}>Ticket Preview</Text>
@@ -224,11 +300,11 @@ export default function ApproveReserved() {
 
           <View style={styles.modalScroll}>
             <View style={styles.modalContent}>
-              {ticketUrl && (
+              {hasPreview && (
                 <GestureDetector gesture={composedGesture}>
                   <Animated.View collapsable={false}>
                     <Animated.Image
-                      source={{ uri: ticketUrl }}
+                      source={{ uri: resolvedTicketUrl }}
                       style={[styles.modalImage, animatedImageStyle]}
                       resizeMode="contain"
                     />
@@ -253,7 +329,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#ECECEC",
   },
-  iconBtn: { padding: 6, borderRadius: 8 },
   title: {
     flex: 1,
     textAlign: "center",

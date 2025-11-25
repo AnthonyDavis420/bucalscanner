@@ -89,9 +89,9 @@ function mapSummaryToUi(src: TicketSummary): UITicket {
   }
 
   const imageUrl =
-    ((src as any)?.ticketUrl ||
+    ((src as any)?.ticket?.ticketUrl ||
+      (src as any)?.ticketUrl ||
       (src as any)?.url ||
-      (src as any)?.ticket?.ticketUrl ||
       "") as string;
 
   return {
@@ -103,7 +103,7 @@ function mapSummaryToUi(src: TicketSummary): UITicket {
     }`,
     price: src.price ?? null,
     status,
-    type: src.type as TicketType | undefined,
+    type: (src as any).type as TicketType | undefined,
   };
 }
 
@@ -113,14 +113,14 @@ export default function ConfirmBundle() {
     seasonId?: string | string[];
     eventName?: string | string[];
     bundleId?: string | string[];
-    parentTicketId?: string | string[]; // 👈 NEW
+    source?: string | string[]; // 👈 NEW
   }>();
 
   const eventId = asString(params.eventId, "");
   const seasonId = asString(params.seasonId, "");
   const eventName = asString(params.eventName, "");
   const bundleId = asString(params.bundleId, "");
-  const parentTicketId = asString(params.parentTicketId, ""); // 👈 NEW
+  const source = asString(params.source, "tickets"); // 👈 NEW
 
   const [tickets, setTickets] = useState<UITicket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,36 +193,21 @@ export default function ConfirmBundle() {
       const items = Array.isArray(res.items) ? res.items : [];
 
       let bundleItems = items.filter((src: TicketSummary) => {
-        const srcBundle = (src as any).bundleId;
-        return srcBundle && String(srcBundle) === bundleId;
+        const anySrc = src as any;
+        const rawBundle =
+          anySrc.bundleId ??
+          anySrc.bundle_id ??
+          anySrc.bundleID ??
+          null;
+        const srcBundle =
+          rawBundle != null ? String(rawBundle).trim() : "";
+        return srcBundle && srcBundle === bundleId;
       });
+
+      console.log("BUNDLE ITEMS COUNT (ConfirmBundle):", bundleItems.length);
 
       if (!bundleItems.length) {
         throw new Error("No tickets found for this bundle.");
-      }
-
-      // 👇 If a specific parentTicketId is provided,
-      //    only keep that parent + its child tickets.
-      if (parentTicketId) {
-        const parent = bundleItems.find((t) => t.id === parentTicketId);
-
-        if (parent) {
-          const parentId = parent.id;
-          const children = bundleItems.filter((t) => {
-            const tAny = t as any;
-            const type = (tAny.type as TicketType | undefined) ?? undefined;
-            const childParentId = (tAny.parentTicketId ?? "") as string;
-
-            return (
-              type === "child" &&
-              childParentId &&
-              String(childParentId) === String(parentId)
-            );
-          });
-
-          bundleItems = [parent, ...children];
-        }
-        // if parentTicketId is invalid, we silently fall back to full bundle
       }
 
       const mapped = bundleItems.map(mapSummaryToUi);
@@ -235,7 +220,7 @@ export default function ConfirmBundle() {
     } finally {
       setLoading(false);
     }
-  }, [eventId, seasonId, bundleId, parentTicketId]); // 👈 include parentTicketId
+  }, [eventId, seasonId, bundleId]);
 
   useEffect(() => {
     loadTickets();
@@ -336,6 +321,7 @@ export default function ConfirmBundle() {
             totalAmount > 0 ? `₱${totalAmount.toFixed(2)}` : "",
           items: JSON.stringify(itemsForParam),
           initialIndex: String(currentIndex),
+          source, // 👈 forward where we came from
         },
       });
     } catch (e: any) {
@@ -391,7 +377,7 @@ export default function ConfirmBundle() {
 
           {!loading && !!tickets.length && (
             <>
-              {/* PREVIEW BOX (swipe + zoom) */}
+              {/* PREVIEW BOX (tap to zoom) */}
               <View style={styles.ticketBox}>
                 {previewUrl ? (
                   <>

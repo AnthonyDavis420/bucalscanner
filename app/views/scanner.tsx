@@ -1,3 +1,4 @@
+// app/views/scanner.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useIsFocused } from "@react-navigation/native";
@@ -282,12 +283,114 @@ export default function Scanner() {
           const status = getTicketStatus(t);
           const parentTicketId = getParentTicketId(t);
           const role = normalizeStatus((t as any).role);
+          const type = normalizeStatus((t as any).type);
+          const isChildFlag = (t as any).isChild === true;
+          const bundleIdFromTicket = String(
+            (t as any).bundleId ?? (t as any).bundle_id ?? ""
+          ).trim();
 
-          console.log("TICKET STATUS/ROLE/PTID:", {
-            status,
-            role,
-            parentTicketId,
-          });
+          console.log(
+            "TICKET STATUS/ROLE/PTID/TYPE/BUNDLE:",
+            {
+              status,
+              role,
+              parentTicketId,
+              type,
+              bundleIdFromTicket,
+              isChildFlag,
+            }
+          );
+
+          // 🔵 Reservation / pending logic
+          if (status === "pending") {
+            if (bundleIdFromTicket) {
+              try {
+                const bundleRes = await scannerApi.fetchTickets(
+                  eventFromCode,
+                  seasonFromCode,
+                  []
+                );
+                const items = Array.isArray(bundleRes.items)
+                  ? bundleRes.items
+                  : [];
+
+                const bundleTickets = items.filter(
+                  (x: TicketSummary) => {
+                    const anyX = x as any;
+                    const rawBundle =
+                      anyX.bundleId ??
+                      anyX.bundle_id ??
+                      null;
+                    const xBundle =
+                      rawBundle != null
+                        ? String(rawBundle).trim()
+                        : "";
+                    return (
+                      xBundle &&
+                      xBundle === bundleIdFromTicket
+                    );
+                  }
+                );
+
+                console.log(
+                  "BUNDLE ITEMS COUNT (scanner):",
+                  bundleTickets.length
+                );
+
+                // If multiple tickets share this bundleId → go to ConfirmBundle
+                if (bundleTickets.length > 1) {
+                  router.push({
+                    pathname: "/views/confirmBundle",
+                    params: {
+                      eventId: eventFromCode,
+                      seasonId: seasonFromCode,
+                      eventName: eventName || "Event",
+                      bundleId: bundleIdFromTicket,
+                      parentTicketId: ticketIdFromCode,
+                      source: "scanner",
+                    },
+                  });
+                  return;
+                }
+              } catch (err) {
+                console.log("BUNDLE LOOKUP ERROR:", err);
+                // fall through to single reservation if something fails
+              }
+            }
+
+            // Single pending reservation → ConfirmReserved
+            const guestName =
+              (t as any).assignedName || "Guest";
+            const price = (t as any).price;
+            const sectionName = (t as any).sectionName ?? "";
+            const sideLabel = (t as any).sideLabel ?? "";
+            const ticketImageUrl =
+              ((t as any)?.ticket?.ticketUrl ||
+                (t as any)?.ticketUrl ||
+                (t as any)?.url ||
+                "") as string;
+
+            router.push({
+              pathname: "/views/confirmReserved",
+              params: {
+                eventId: eventFromCode,
+                seasonId: seasonFromCode,
+                eventName: eventName || "Event Ticket",
+                ticketId: ticketIdFromCode,
+                ticketUrl: ticketImageUrl,
+                guestName,
+                section: sectionName,
+                side: sideLabel,
+                totalAmount:
+                  typeof price === "number"
+                    ? String(price)
+                    : "",
+                refNumber: ticketIdFromCode,
+                source: "scanner", 
+              },
+            });
+            return;
+          }
 
           if (status === "redeemed" || status === "used") {
             Alert.alert(
@@ -298,10 +401,9 @@ export default function Scanner() {
             return;
           }
 
-          // 🔴 New special handling for INVALID tickets
+          // 🔴 Special handling for INVALID tickets
           if (!status || status !== "active") {
             if (status === "invalid") {
-              // Ask staff if they want to overwrite an invalid ticket
               Alert.alert(
                 "Invalid Ticket",
                 "This ticket has been marked as invalid. Do you wish to overwrite it?",
@@ -309,18 +411,17 @@ export default function Scanner() {
                   {
                     text: "No",
                     style: "cancel",
-                    // Do nothing, just stay on scanner
                   },
                   {
                     text: "Yes",
                     onPress: () => {
-                      // Proceed to confirm screen to let them overwrite
                       router.push({
                         pathname: "/views/confirmTicket",
                         params: {
                           mode: "scan",
                           code: encodedPayload,
-                          eventName: eventName || "Event Ticket",
+                          eventName:
+                            eventName || "Event Ticket",
                         },
                       });
                     },
@@ -328,15 +429,24 @@ export default function Scanner() {
                 ]
               );
             } else {
-              // Other non-active statuses (expired, cancelled, pending, etc.)
               showStatusAlert("Ticket", status || "");
             }
             return;
           }
 
-          const isChildTicket = !!parentTicketId;
+          // Active child tickets → require adult redeemed first
+          const isChildTicketActive =
+            isChildFlag || !!parentTicketId || type === "child";
 
-          if (isChildTicket) {
+          if (isChildTicketActive) {
+            if (!parentTicketId) {
+              Alert.alert(
+                "Sponsor Not Found",
+                "Sponsor ticket not found for this bundle. Please refer to the help desk."
+              );
+              return;
+            }
+
             try {
               const parentRes = await scannerApi.fetchTickets(
                 eventFromCode,
@@ -379,7 +489,7 @@ export default function Scanner() {
             }
           }
 
-          // ✅ All checks passed for this ticket → go to confirm screen
+          // ✅ All checks passed for this active ticket → confirmTicket
           router.push({
             pathname: "/views/confirmTicket",
             params: {
@@ -419,7 +529,9 @@ export default function Scanner() {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Requesting camera permission…</Text>
+        <Text style={{ marginTop: 8 }}>
+          Requesting camera permission…
+        </Text>
       </SafeAreaView>
     );
   }
@@ -427,7 +539,9 @@ export default function Scanner() {
   if (!permission.granted) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={{ marginBottom: 12 }}>Camera access is required</Text>
+        <Text style={{ marginBottom: 12 }}>
+          Camera access is required
+        </Text>
         <Pressable style={styles.primaryBtn} onPress={requestPermission}>
           <Text style={styles.primaryBtnText}>Grant Permission</Text>
         </Pressable>
