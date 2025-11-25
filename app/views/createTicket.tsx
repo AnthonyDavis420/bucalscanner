@@ -17,6 +17,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi, type EventDetails } from "../../lib/api";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 const STORAGE_KEYS = {
   eventId: "bucalscanner.activeEventId",
@@ -46,18 +56,6 @@ type SeatOption = {
   teamName?: string | null;
 };
 
-const clearActiveEventStorage = async () => {
-  try {
-    await AsyncStorage.multiRemove([
-      STORAGE_KEYS.eventId,
-      STORAGE_KEYS.seasonId,
-      STORAGE_KEYS.eventName,
-    ]);
-  } catch {
-  }
-};
-
-
 export default function CreateTicket() {
   const [backDisabled, setBackDisabled] = useState(false);
   useFocusEffect(
@@ -81,7 +79,14 @@ export default function CreateTicket() {
   const [headerSubtitle, setHeaderSubtitle] = useState("");
 
   const [imgViewerVisible, setImgViewerVisible] = useState(false);
-  const [zoom, setZoom] = useState(1);
+
+  // 🔍 Shared values for pinch & pan (map image)
+  const mapScale = useSharedValue(1);
+  const mapSavedScale = useSharedValue(1);
+  const mapTranslateX = useSharedValue(0);
+  const mapTranslateY = useSharedValue(0);
+  const mapSavedTranslateX = useSharedValue(0);
+  const mapSavedTranslateY = useSharedValue(0);
 
   const mkAdult = (): TicketForm => ({
     fullName: "",
@@ -312,10 +317,9 @@ export default function CreateTicket() {
   const confirmBack = () => {
     setBackWarnVisible(false);
     setBackDisabled(true);
-    clearActiveEventStorage().finally(() => {
-      router.replace("/views/welcome");
-      setTimeout(() => setBackDisabled(false), 450);
-    });
+    // keep event in storage so welcome still knows the active event
+    router.replace("/views/welcome");
+    setTimeout(() => setBackDisabled(false), 450);
   };
 
   const cancelBack = () => setBackWarnVisible(false);
@@ -343,6 +347,44 @@ export default function CreateTicket() {
       : "https://via.placeholder.com/700x300.png?text=Seating+Map";
   }, [event]);
 
+  // 🌀 Gesture definitions for map zoom modal
+  const mapPinch = Gesture.Pinch()
+    .onStart(() => {
+      mapSavedScale.value = mapScale.value;
+    })
+    .onUpdate((e) => {
+      mapScale.value = mapSavedScale.value * e.scale;
+    })
+    .onEnd(() => {
+      if (mapScale.value < 1) {
+        mapScale.value = withTiming(1);
+        mapTranslateX.value = withTiming(0);
+        mapTranslateY.value = withTiming(0);
+      } else if (mapScale.value > 4) {
+        mapScale.value = withTiming(4);
+      }
+    });
+
+  const mapPan = Gesture.Pan()
+    .onStart(() => {
+      mapSavedTranslateX.value = mapTranslateX.value;
+      mapSavedTranslateY.value = mapTranslateY.value;
+    })
+    .onUpdate((e) => {
+      mapTranslateX.value = mapSavedTranslateX.value + e.translationX;
+      mapTranslateY.value = mapSavedTranslateY.value + e.translationY;
+    });
+
+  const mapGesture = Gesture.Simultaneous(mapPinch, mapPan);
+
+  const mapAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: mapTranslateX.value },
+      { translateY: mapTranslateY.value },
+      { scale: mapScale.value },
+    ],
+  }));
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -364,17 +406,28 @@ export default function CreateTicket() {
             <View style={{ width: 22 }} />
           </View>
 
-          <Pressable style={styles.card} onPress={() => { setImgViewerVisible(true); setZoom(1); }}>
-            <Image
-              source={{ uri: venueImageUri }}
-              style={styles.mapImage}
-              resizeMode="contain"
-            />
-            <View style={styles.tapHint}>
-              <Ionicons name="expand" size={14} color="#fff" />
-              <Text style={styles.tapHintText}>Tap to zoom</Text>
-            </View>
-          </Pressable>
+          {/* Preview box styled like confirmVoucher */}
+          <View style={styles.ticketBox}>
+            <Pressable
+              style={styles.ticketPressable}
+              onPress={() => {
+                // reset zoom + pan when opening viewer
+                mapScale.value = 1;
+                mapTranslateX.value = 0;
+                mapTranslateY.value = 0;
+                setImgViewerVisible(true);
+              }}
+            >
+              <View style={styles.ticketInnerShadow}>
+                <Image
+                  source={{ uri: venueImageUri }}
+                  style={styles.ticketImage}
+                  resizeMode="contain"
+                />
+              </View>
+            </Pressable>
+            <Text style={styles.ticketTapHint}>Tap seating map to zoom</Text>
+          </View>
 
           <View style={styles.ticketCountCard}>
             <Text style={styles.ticketCountTitle}>Number of Tickets</Text>
@@ -464,7 +517,11 @@ export default function CreateTicket() {
               <>
                 <Text style={styles.ticketTitle}>
                   {current.isChild
-                    ? `Child Ticket${childTickets.length > 1 ? ` (${childIndex + 1} of ${childTickets.length})` : ""}`
+                    ? `Child Ticket${
+                        childTickets.length > 1
+                          ? ` (${childIndex + 1} of ${childTickets.length})`
+                          : ""
+                      }`
                     : "Adult Ticket"}
                 </Text>
 
@@ -596,7 +653,8 @@ export default function CreateTicket() {
             {tickets.map((t, i) => (
               <View key={i} style={styles.lineItemRow}>
                 <Text style={styles.lineItemLeft}>
-                  1x {t.section ? `${t.section} (${t.side})` : "Unassigned"} {t.isChild ? "(Child)" : "(Adult)"}
+                  1x {t.section ? `${t.section} (${t.side})` : "Unassigned"}{" "}
+                  {t.isChild ? "(Child)" : "(Adult)"}
                 </Text>
                 <Text style={styles.lineItemRight}>₱{t.price || 0}</Text>
               </View>
@@ -634,7 +692,8 @@ export default function CreateTicket() {
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Before you proceed</Text>
               <Text style={styles.modalBody}>
-                Be prepared to show a valid ID or proof at the venue; non-compliance may lead to cancellation of the tickets.
+                Be prepared to show a valid ID or proof at the venue; non-compliance may lead to
+                cancellation of the tickets.
               </Text>
               <View style={styles.modalActions}>
                 <Pressable style={styles.modalCancel} onPress={cancelTogglePWD}>
@@ -655,7 +714,7 @@ export default function CreateTicket() {
         animationType="fade"
         onRequestClose={() => setImgViewerVisible(false)}
       >
-        <View style={styles.viewerBackdrop}>
+        <GestureHandlerRootView style={styles.viewerBackdrop}>
           <View style={styles.viewerHeader}>
             <Pressable onPress={() => setImgViewerVisible(false)} hitSlop={10}>
               <Ionicons name="close" size={22} color="#fff" />
@@ -665,34 +724,19 @@ export default function CreateTicket() {
           </View>
 
           <View style={styles.viewerBody}>
-            <Pressable style={styles.viewerImageWrap} onPress={() => setZoom((z) => Math.min(4, z + 0.5))}>
-              <Image
-                source={{ uri: venueImageUri }}
-                style={[styles.viewerImage, { transform: [{ scale: zoom }] }]}
-                resizeMode="contain"
-              />
-            </Pressable>
-
-            <View style={styles.zoomControls}>
-              <Pressable
-                onPress={() => setZoom((z) => Math.max(1, +(z - 0.25).toFixed(2)))}
-                style={styles.zoomBtn}
-              >
-                <Ionicons name="remove" size={18} color="#111827" />
-              </Pressable>
-              <Text style={styles.zoomPct}>{Math.round(zoom * 100)}%</Text>
-              <Pressable
-                onPress={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}
-                style={styles.zoomBtn}
-              >
-                <Ionicons name="add" size={18} color="#111827" />
-              </Pressable>
-              <Pressable onPress={() => setZoom(1)} style={[styles.zoomBtn, { paddingHorizontal: 10 }]}>
-                <Text style={{ color: "#111827", fontWeight: "700" }}>Reset</Text>
-              </Pressable>
-            </View>
+            {venueImageUri ? (
+              <GestureDetector gesture={mapGesture}>
+                <Animated.View collapsable={false} style={styles.viewerImageWrap}>
+                  <Animated.Image
+                    source={{ uri: venueImageUri }}
+                    style={[styles.viewerImage, mapAnimatedStyle]}
+                    resizeMode="contain"
+                  />
+                </Animated.View>
+              </GestureDetector>
+            ) : null}
           </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
 
       <Modal visible={backWarnVisible} transparent animationType="fade" onRequestClose={cancelBack}>
@@ -702,10 +746,16 @@ export default function CreateTicket() {
               <Text style={styles.modalTitle}>Leave this screen?</Text>
               <Text style={styles.modalBody}>Your current ticket inputs will be discarded.</Text>
               <View style={styles.modalActions}>
-                <Pressable style={[styles.modalCancel, { backgroundColor: "#E5E7EB" }]} onPress={cancelBack}>
+                <Pressable
+                  style={[styles.modalCancel, { backgroundColor: "#E5E7EB" }]}
+                  onPress={cancelBack}
+                >
                   <Text style={[styles.modalCancelText, { color: "#111827" }]}>Stay</Text>
                 </Pressable>
-                <Pressable style={[styles.modalConfirm, { backgroundColor: "#E53935" }]} onPress={confirmBack}>
+                <Pressable
+                  style={[styles.modalConfirm, { backgroundColor: "#E53935" }]}
+                  onPress={confirmBack}
+                >
                   <Text style={styles.modalConfirmText}>Leave</Text>
                 </Pressable>
               </View>
@@ -723,29 +773,39 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
   headerTitle: { fontSize: 18, fontWeight: "800", color: "#071689" },
   headerSubtitle: { fontSize: 13, color: "#4B5563" },
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 14,
-    padding: 12,
-    position: "relative",
+
+  // 🔹 Preview box styled like confirmVoucher ticketBox
+  ticketBox: {
+    width: "100%",
+    borderRadius: 12,
     overflow: "hidden",
+    marginTop: 4,
+    marginBottom: 18,
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-  mapImage: { width: "100%", height: 180, borderRadius: 8, backgroundColor: "#E5E7EB" },
-  tapHint: {
-    position: "absolute",
-    right: 12,
-    bottom: 12,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 8,
-    flexDirection: "row",
+  ticketPressable: {
+    width: "100%",
+  },
+  ticketInnerShadow: {
+    padding: 8,
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
   },
-  tapHintText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  ticketImage: {
+    width: "100%",
+    aspectRatio: 3 / 2,
+    borderRadius: 10,
+    backgroundColor: "#E5E7EB",
+  },
+  ticketTapHint: {
+    fontSize: 12,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingBottom: 8,
+  },
+
   ticketCountCard: {
     borderWidth: 1,
     borderColor: "#E5E7EB",
@@ -925,23 +985,32 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 16, fontWeight: "800", color: "#0F172A" },
   modalBody: { fontSize: 14, color: "#111827" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 6 },
-  modalCancel: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: "#E5E7EB" },
+  modalCancel: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "#E5E7EB",
+  },
   modalCancelText: { color: "#111827", fontWeight: "700" },
-  modalConfirm: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: "#071689" },
+  modalConfirm: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "#071689",
+  },
   modalConfirmText: { color: "#fff", fontWeight: "700" },
+
   viewerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.95)" },
   viewerHeader: {
-    paddingTop: 14, paddingHorizontal: 16, paddingBottom: 10,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingTop: 14,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   viewerTitle: { color: "#fff", fontWeight: "800" },
   viewerBody: { flex: 1, paddingHorizontal: 10, paddingBottom: 18 },
   viewerImageWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   viewerImage: { width: "100%", height: "100%" },
-  zoomControls: {
-    position: "absolute", bottom: 18, left: 0, right: 0,
-    alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10,
-  },
-  zoomBtn: { backgroundColor: "#ffffff", borderColor: "#D1D5DB", borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
-  zoomPct: { color: "#fff", fontWeight: "700", width: 48, textAlign: "center" },
 });

@@ -1,3 +1,4 @@
+// app/views/confirmTicket.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
@@ -12,7 +13,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { scannerApi, type TicketSummary } from "../../lib/api";
 import {
   Gesture,
   GestureDetector,
@@ -23,6 +23,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+import { scannerApi, type TicketSummary } from "../../lib/api";
 
 type TicketStatus =
   | "active"
@@ -32,9 +33,33 @@ type TicketStatus =
   | "cancelled"
   | "pending";
 
+type TicketType = "adult" | "child" | "priority";
+
+type BundleTicket = TicketSummary & {
+  type?: TicketType;
+};
+
+type Mode = "create" | "scan" | "list" | "bundle";
+
+function typeRank(type?: TicketType | null): number {
+  if (type === "adult") return 0;
+  if (type === "priority") return 1;
+  if (type === "child") return 2;
+  return 3;
+}
+
+const ALLOWED_STATUSES: TicketStatus[] = [
+  "active",
+  "redeemed",
+  "invalid",
+  "expired",
+  "cancelled",
+  "pending",
+];
+
 export default function ConfirmTicket() {
   const params = useLocalSearchParams<{
-    mode?: "create" | "scan";
+    mode?: Mode;
     status?: TicketStatus;
     eventName?: string;
     holderName?: string;
@@ -42,18 +67,38 @@ export default function ConfirmTicket() {
     ticketId?: string;
     ticketUrl?: string;
     code?: string;
+    eventId?: string;
+    seasonId?: string;
+    bundleId?: string;
   }>();
 
-  const mode =
-    (Array.isArray(params.mode) ? params.mode[0] : params.mode) || "scan";
+  const rawMode = Array.isArray(params.mode) ? params.mode[0] : params.mode;
+  const mode: Mode =
+    rawMode === "create"
+      ? "create"
+      : rawMode === "list"
+      ? "list"
+      : rawMode === "bundle"
+      ? "bundle"
+      : "scan";
+
   const isScanMode = mode === "scan";
   const isCreateMode = mode === "create";
+  const isBundleMode = mode === "bundle";
+  const fromAllTickets = mode === "list" || mode === "bundle";
 
   const [status, setStatus] = useState<TicketStatus>(
-    (Array.isArray(params.status) ? params.status[0] : params.status) ?? "active"
+    (Array.isArray(params.status) ? params.status[0] : params.status) ??
+      "active"
   );
+
   const [ticket, setTicket] = useState<TicketSummary | null>(null);
-  const [loading, setLoading] = useState<boolean>(isScanMode);
+  const [bundleTickets, setBundleTickets] = useState<BundleTicket[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const [loading, setLoading] = useState<boolean>(
+    isScanMode || fromAllTickets || isBundleMode
+  );
   const [error, setError] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
 
@@ -65,94 +110,261 @@ export default function ConfirmTicket() {
 
   const [actionBusy, setActionBusy] = useState(false);
 
-  const fallbackEventName =
-    (Array.isArray(params.eventName) ? params.eventName[0] : params.eventName) ||
-    "Event Ticket";
-  const fallbackHolder =
-    (Array.isArray(params.holderName) ? params.holderName[0] : params.holderName) ||
-    "John Doe";
-  const fallbackSide =
-    (Array.isArray(params.side) ? params.side[0] : params.side) ||
-    "Section @ Side";
-  const fallbackTicketId =
-    (Array.isArray(params.ticketId) ? params.ticketId[0] : params.ticketId) ||
-    "TICKET-ID";
-  const fallbackTicketUrl =
-    (Array.isArray(params.ticketUrl) ? params.ticketUrl[0] : params.ticketUrl) ||
-    "";
+  const rawEventName = Array.isArray(params.eventName)
+    ? params.eventName[0]
+    : params.eventName;
+  const rawHolder = Array.isArray(params.holderName)
+    ? params.holderName[0]
+    : params.holderName;
+  const rawSide = Array.isArray(params.side) ? params.side[0] : params.side;
+  const rawTicketUrlParam = Array.isArray(params.ticketUrl)
+    ? params.ticketUrl[0]
+    : params.ticketUrl;
+  const rawTicketIdParam = Array.isArray(params.ticketId)
+    ? params.ticketId[0]
+    : params.ticketId;
+
+  const rawEventIdParam = Array.isArray(params.eventId)
+    ? params.eventId[0]
+    : params.eventId;
+  const rawSeasonIdParam = Array.isArray(params.seasonId)
+    ? params.seasonId[0]
+    : params.seasonId;
+  const rawBundleIdParam = Array.isArray(params.bundleId)
+    ? params.bundleId[0]
+    : params.bundleId;
+
+  const eventIdFromParams = (rawEventIdParam || "").trim();
+  const seasonIdFromParams = (rawSeasonIdParam || "").trim();
+  const ticketIdFromParams = (rawTicketIdParam || "").trim();
+  const bundleId = (rawBundleIdParam || "").trim();
+
+  const fallbackEventName = rawEventName || "Event Ticket";
+  const fallbackHolder = rawHolder || "John Doe";
+  const fallbackSide = rawSide || "Section @ Side";
+  const fallbackTicketId = ticketIdFromParams || "TICKET-ID";
+  const fallbackTicketUrl = rawTicketUrlParam || "";
 
   const eventName = fallbackEventName;
 
   useEffect(() => {
-    if (!isScanMode) {
-      setLoading(false);
-      return;
-    }
-
-    const rawParam = Array.isArray(params.code) ? params.code[0] : params.code;
-    if (!rawParam) {
-      setError("Missing QR code data.");
-      setLoading(false);
-      return;
-    }
-
-    let payload: any = null;
-    try {
-      const decodedStr = decodeURIComponent(String(rawParam));
-      payload = JSON.parse(decodedStr);
-    } catch {
-      setError("Invalid ticket QR code.");
-      setLoading(false);
-      return;
-    }
-
-    const seasonId = String(payload?.seasonId || "").trim();
-    const eventId = String(payload?.eventId || "").trim();
-    const ticketId = String(
-      payload?.ticketId ||
-        (Array.isArray(params.ticketId) ? params.ticketId[0] : params.ticketId) ||
-        ""
-    ).trim();
-
-    if (!seasonId || !eventId || !ticketId) {
-      setError("Incomplete ticket information.");
-      setLoading(false);
-      return;
-    }
-
-    setCtx({ seasonId, eventId, ticketId });
-
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await scannerApi.fetchTickets(eventId, seasonId, [ticketId]);
-        console.log("CONFIRM_TICKET_RES:", JSON.stringify(res, null, 2));
-        const t = (res.items || [])[0] || null;
-        if (!t) {
-          setError("Ticket not found.");
-        } else {
-          setTicket(t);
-          const rawStatus = String((t as any).status || "").toLowerCase();
-          const allowed: TicketStatus[] = [
-            "active",
-            "redeemed",
-            "invalid",
-            "expired",
-            "cancelled",
-            "pending",
-          ];
-          if (allowed.includes(rawStatus as TicketStatus)) {
-            setStatus(rawStatus as TicketStatus);
-          }
-        }
-      } catch (e: any) {
-        setError(e?.message || "Failed to load ticket.");
-      } finally {
+    if (mode === "bundle") {
+      if (!eventIdFromParams || !seasonIdFromParams || !bundleId) {
+        setError("Missing bundle ticket context.");
         setLoading(false);
+        return;
       }
-    })();
-  }, [isScanMode, params.code, params.ticketId]);
+
+      let cancelled = false;
+
+      (async () => {
+        try {
+          setLoading(true);
+          setError(null);
+          const res = await scannerApi.fetchTickets(
+            eventIdFromParams,
+            seasonIdFromParams,
+            []
+          );
+          const items = Array.isArray(res.items) ? res.items : [];
+          const bundleItems = items.filter((src: TicketSummary) => {
+            const srcBundle = (src as any).bundleId;
+            return srcBundle && String(srcBundle) === bundleId;
+          });
+
+          if (!bundleItems.length) {
+            throw new Error("No tickets found for this bundle.");
+          }
+
+          const sorted = [...bundleItems].sort((a, b) => {
+            const ta = (a as any).type as TicketType | undefined;
+            const tb = (b as any).type as TicketType | undefined;
+            return typeRank(ta) - typeRank(tb);
+          });
+
+          if (!cancelled) {
+            setBundleTickets(sorted as BundleTicket[]);
+            setCurrentIndex(0);
+          }
+        } catch (e: any) {
+          if (!cancelled) {
+            setError(e?.message || "Failed to load bundle tickets.");
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (isCreateMode) {
+      setLoading(false);
+      return;
+    }
+
+    if (isScanMode) {
+      const rawParam = Array.isArray(params.code)
+        ? params.code[0]
+        : params.code;
+      if (!rawParam) {
+        setError("Missing QR code data.");
+        setLoading(false);
+        return;
+      }
+
+      let payload: any = null;
+      try {
+        const decodedStr = decodeURIComponent(String(rawParam));
+        payload = JSON.parse(decodedStr);
+      } catch {
+        setError("Invalid ticket QR code.");
+        setLoading(false);
+        return;
+      }
+
+      const seasonId = String(payload?.seasonId || "").trim();
+      const eventId = String(payload?.eventId || "").trim();
+      const ticketId = String(
+        payload?.ticketId || ticketIdFromParams || ""
+      ).trim();
+
+      if (!seasonId || !eventId || !ticketId) {
+        setError("Incomplete ticket information.");
+        setLoading(false);
+        return;
+      }
+
+      setCtx({ seasonId, eventId, ticketId });
+
+      (async () => {
+        try {
+          setLoading(true);
+          setError(null);
+          const res = await scannerApi.fetchTickets(eventId, seasonId, [
+            ticketId,
+          ]);
+          const t = (res.items || [])[0] || null;
+          if (!t) {
+            setError("Ticket not found.");
+          } else {
+            setTicket(t);
+            const rawStatus = String((t as any).status || "").toLowerCase();
+            if (ALLOWED_STATUSES.includes(rawStatus as TicketStatus)) {
+              setStatus(rawStatus as TicketStatus);
+            } else {
+              setStatus("active");
+            }
+          }
+        } catch (e: any) {
+          setError(e?.message || "Failed to load ticket.");
+        } finally {
+          setLoading(false);
+        }
+      })();
+
+      return;
+    }
+
+    if (
+      fromAllTickets &&
+      eventIdFromParams &&
+      seasonIdFromParams &&
+      ticketIdFromParams
+    ) {
+      setCtx({
+        seasonId: seasonIdFromParams,
+        eventId: eventIdFromParams,
+        ticketId: ticketIdFromParams,
+      });
+
+      (async () => {
+        try {
+          setLoading(true);
+          setError(null);
+          const res = await scannerApi.fetchTickets(
+            eventIdFromParams,
+            seasonIdFromParams,
+            [ticketIdFromParams]
+          );
+          const t = (res.items || [])[0] || null;
+          if (!t) {
+            setError("Ticket not found.");
+          } else {
+            setTicket(t);
+            const rawStatus = String((t as any).status || "").toLowerCase();
+            if (ALLOWED_STATUSES.includes(rawStatus as TicketStatus)) {
+              setStatus(rawStatus as TicketStatus);
+            } else {
+              setStatus("active");
+            }
+          }
+        } catch (e: any) {
+          setError(e?.message || "Failed to load ticket.");
+        } finally {
+          setLoading(false);
+        }
+      })();
+
+      return;
+    }
+
+    setLoading(false);
+  }, [
+    mode,
+    isScanMode,
+    isCreateMode,
+    fromAllTickets,
+    params.code,
+    eventIdFromParams,
+    seasonIdFromParams,
+    ticketIdFromParams,
+    bundleId,
+  ]);
+
+  useEffect(() => {
+    if (!isBundleMode || !bundleTickets.length) return;
+
+    const maxIndex = bundleTickets.length - 1;
+    const safeIndex =
+      currentIndex < 0
+        ? 0
+        : currentIndex > maxIndex
+        ? maxIndex
+        : currentIndex;
+
+    if (safeIndex !== currentIndex) {
+      setCurrentIndex(safeIndex);
+      return;
+    }
+
+    const current = bundleTickets[safeIndex];
+    if (!current) return;
+
+    setTicket(current);
+    const rawStatus = String((current as any).status || "").toLowerCase();
+    if (ALLOWED_STATUSES.includes(rawStatus as TicketStatus)) {
+      setStatus(rawStatus as TicketStatus);
+    } else {
+      setStatus("active");
+    }
+
+    if (eventIdFromParams && seasonIdFromParams) {
+      setCtx({
+        seasonId: seasonIdFromParams,
+        eventId: eventIdFromParams,
+        ticketId: current.id,
+      });
+    }
+  }, [
+    isBundleMode,
+    bundleTickets,
+    currentIndex,
+    eventIdFromParams,
+    seasonIdFromParams,
+  ]);
 
   const holderFromTicket = ticket?.assignedName;
   const sideFromTicket =
@@ -186,7 +398,6 @@ export default function ConfirmTicket() {
       : "adult";
 
   const ticketImageUrl = imageFromTicket || fallbackTicketUrl || null;
-  console.log("ticketImageUrl =", ticketImageUrl);
 
   const header = useMemo(() => {
     if (isCreateMode) {
@@ -228,6 +439,13 @@ export default function ConfirmTicket() {
       setTicket((prev) =>
         prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
       );
+      if (isBundleMode) {
+        setBundleTickets((prev) =>
+          prev.map((t) =>
+            t.id === ticket.id ? ({ ...t, status: nextStatus } as BundleTicket) : t
+          )
+        );
+      }
     } catch (e: any) {
       Alert.alert(
         "Update failed",
@@ -258,6 +476,13 @@ export default function ConfirmTicket() {
       setTicket((prev) =>
         prev ? ({ ...prev, status: "active" } as TicketSummary) : prev
       );
+      if (isBundleMode) {
+        setBundleTickets((prev) =>
+          prev.map((t) =>
+            t.id === ticket.id ? ({ ...t, status: "active" } as BundleTicket) : t
+          )
+        );
+      }
     } catch (e: any) {
       Alert.alert(
         "Undo failed",
@@ -271,7 +496,14 @@ export default function ConfirmTicket() {
   const handleRedeem = () => void handleUpdateStatus("redeemed");
   const handleInvalidate = () => void handleUpdateStatus("invalid");
 
+  const goBackToTickets = () => router.back();
+
   const handleBack = async () => {
+    if (fromAllTickets) {
+      goBackToTickets();
+      return;
+    }
+
     if (isCreateMode) {
       router.replace("/views/welcome");
       return;
@@ -339,11 +571,45 @@ export default function ConfirmTicket() {
     ],
   }));
 
+  const hasBundlePagination =
+    isBundleMode && bundleTickets.length > 1 && !!ticketImageUrl;
+
+  const handlePrevBundleTicket = () => {
+    if (!hasBundlePagination) return;
+    setCurrentIndex((prev) =>
+      prev <= 0 ? bundleTickets.length - 1 : prev - 1
+    );
+  };
+
+  const handleNextBundleTicket = () => {
+    if (!hasBundlePagination) return;
+    setCurrentIndex((prev) =>
+      prev >= bundleTickets.length - 1 ? 0 : prev + 1
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.topBar}>
-        <View style={{ width: 22 }} />
-        <Text style={[styles.title, { color: header?.color }]}>{header?.text}</Text>
+        <Pressable
+          onPress={handleBack}
+          hitSlop={12}
+          style={({ pressed }) => [
+            styles.iconBtn,
+            pressed && { backgroundColor: "#F3F4F6" },
+          ]}
+        >
+          <Ionicons
+            name="arrow-back"
+            size={22}
+            color={header?.color ?? "#071689"}
+          />
+        </Pressable>
+
+        <Text style={[styles.title, { color: header?.color }]}>
+          {header?.text}
+        </Text>
+
         <View style={{ width: 22 }} />
       </View>
 
@@ -358,49 +624,118 @@ export default function ConfirmTicket() {
         {!loading && error && (
           <View style={styles.centerBox}>
             <Text style={styles.errorText}>{error}</Text>
-            <Pressable
-              onPress={handleScanAgain}
-              style={[styles.cta, { backgroundColor: "#071689", marginTop: 18 }]}
-            >
-              <Text style={styles.ctaText}>Scan Again</Text>
-            </Pressable>
+            {!fromAllTickets && (
+              <Pressable
+                onPress={handleScanAgain}
+                style={[
+                  styles.cta,
+                  { backgroundColor: "#071689", marginTop: 18 },
+                ]}
+              >
+                <Text style={styles.ctaText}>Scan Again</Text>
+              </Pressable>
+            )}
+            {fromAllTickets && (
+              <Pressable
+                onPress={goBackToTickets}
+                style={[
+                  styles.cta,
+                  { backgroundColor: "#071689", marginTop: 18 },
+                ]}
+              >
+                <Text style={styles.ctaText}>Back to Tickets</Text>
+              </Pressable>
+            )}
           </View>
         )}
 
         {!loading && !error && (
           <>
-            <Pressable
-              style={styles.ticketWrap}
-              onPress={() => {
-                if (ticketImageUrl) {
-                  scale.value = 1;
-                  translateX.value = 0;
-                  translateY.value = 0;
-                  setZoomOpen(true);
-                }
-              }}
-            >
+            <View style={styles.ticketBox}>
               {ticketImageUrl ? (
-                <Image
-                  source={{ uri: ticketImageUrl }}
-                  style={styles.ticketImage}
-                  resizeMode="contain"
-                  onError={(e) => {
-                    console.log("IMAGE LOAD ERROR:", e.nativeEvent);
-                    console.log("IMAGE URI THAT FAILED:", ticketImageUrl);
-                  }}
-                />
+                <>
+                  <Pressable
+                    style={styles.ticketPressable}
+                    onPress={() => {
+                      scale.value = 1;
+                      translateX.value = 0;
+                      translateY.value = 0;
+                      setZoomOpen(true);
+                    }}
+                  >
+                    <View style={styles.ticketInnerShadow}>
+                      <Image
+                        source={{ uri: ticketImageUrl }}
+                        style={styles.ticketImage}
+                        resizeMode="contain"
+                        onError={(e) => {
+                          console.log("IMAGE LOAD ERROR:", e.nativeEvent);
+                          console.log(
+                            "IMAGE URI THAT FAILED:",
+                            ticketImageUrl
+                          );
+                        }}
+                      />
+                    </View>
+                  </Pressable>
+                  <Text style={styles.tapHint}>
+                    {hasBundlePagination
+                      ? `Tap to zoom · Ticket ${
+                          currentIndex + 1
+                        } of ${bundleTickets.length}`
+                      : "Tap ticket to zoom"}
+                  </Text>
+                  {hasBundlePagination && (
+                    <View style={styles.paginationRow}>
+                      <Pressable
+                        onPress={handlePrevBundleTicket}
+                        style={({ pressed }) => [
+                          styles.pageBtn,
+                          pressed && { opacity: 0.7 },
+                        ]}
+                        hitSlop={8}
+                      >
+                        <Ionicons
+                          name="chevron-back"
+                          size={18}
+                          color="#374151"
+                        />
+                      </Pressable>
+                      <Text style={styles.pageLabel}>
+                        Ticket {currentIndex + 1} of {bundleTickets.length}
+                      </Text>
+                      <Pressable
+                        onPress={handleNextBundleTicket}
+                        style={({ pressed }) => [
+                          styles.pageBtn,
+                          pressed && { opacity: 0.7 },
+                        ]}
+                        hitSlop={8}
+                      >
+                        <Ionicons
+                          name="chevron-forward"
+                          size={18}
+                          color="#374151"
+                        />
+                      </Pressable>
+                    </View>
+                  )}
+                </>
               ) : (
-                <View style={styles.ticketFallback}>
-                  <Text style={styles.muted}>No ticket image available</Text>
+                <View style={styles.ticketPlaceholder}>
+                  <Text style={styles.placeholderText}>
+                    Ticket image not available
+                  </Text>
                 </View>
               )}
-            </Pressable>
+            </View>
 
             {showPriorityBadge && (
               <View style={styles.badgeRow}>
                 <View style={styles.priorityBadge}>
-                  <Text style={styles.priorityBadgeText}>PRIORITY TICKET</Text>
+                  <Text style={styles.priorityBadgeText}>
+                    PRIORITY TICKET
+                  </Text>
                 </View>
               </View>
             )}
@@ -468,7 +803,9 @@ export default function ConfirmTicket() {
                     onPress={handleBack}
                     style={[styles.cta, styles.ghost, { flex: 1 }]}
                   >
-                    <Text style={[styles.ctaText, { color: "#111" }]}>Back</Text>
+                    <Text style={[styles.ctaText, { color: "#111" }]}>
+                      Back
+                    </Text>
                   </Pressable>
                 </View>
               )}
@@ -476,17 +813,33 @@ export default function ConfirmTicket() {
             {!isCreateMode &&
               (status === "redeemed" || status === "invalid") && (
                 <View style={styles.row}>
-                  <Pressable onPress={handleBack} style={[styles.cta, styles.ghost]}>
+                  <Pressable
+                    onPress={handleUndoToActive}
+                    disabled={actionBusy}
+                    style={[styles.cta, styles.ghost]}
+                  >
                     <Text style={[styles.ctaText, { color: "#111" }]}>
                       Revert Changes
                     </Text>
                   </Pressable>
-                  <Pressable
-                    onPress={handleScanAgain}
-                    style={[styles.cta, { backgroundColor: "#071689" }]}
-                  >
-                    <Text style={styles.ctaText}>Scan Again</Text>
-                  </Pressable>
+
+                  {!fromAllTickets ? (
+                    <Pressable
+                      onPress={handleScanAgain}
+                      disabled={actionBusy}
+                      style={[styles.cta, { backgroundColor: "#071689" }]}
+                    >
+                      <Text style={styles.ctaText}>Scan Again</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      onPress={goBackToTickets}
+                      disabled={actionBusy}
+                      style={[styles.cta, { backgroundColor: "#071689" }]}
+                    >
+                      <Text style={styles.ctaText}>Back to Tickets</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
           </>
@@ -500,32 +853,29 @@ export default function ConfirmTicket() {
         onRequestClose={() => setZoomOpen(false)}
       >
         <GestureHandlerRootView style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Ticket Preview</Text>
-              <Pressable
-                onPress={() => setZoomOpen(false)}
-                hitSlop={10}
-                style={styles.closeBtn}
-              >
-                <Ionicons name="close" size={22} color="#111" />
-              </Pressable>
-            </View>
-            <View style={styles.zoomWrap}>
-              {ticketImageUrl ? (
+          <View style={styles.modalHeader}>
+            <Pressable
+              onPress={() => setZoomOpen(false)}
+              style={styles.modalCloseBtn}
+            >
+              <Ionicons name="close" size={22} color="#fff" />
+            </Pressable>
+            <Text style={styles.modalTitle}>Ticket Preview</Text>
+            <View style={{ width: 22 }} />
+          </View>
+
+          <View style={styles.modalScroll}>
+            <View style={styles.modalContent}>
+              {ticketImageUrl && (
                 <GestureDetector gesture={composedGesture}>
                   <Animated.View collapsable={false}>
                     <Animated.Image
                       source={{ uri: ticketImageUrl }}
-                      style={[styles.zoomImage, animatedImageStyle]}
+                      style={[styles.modalImage, animatedImageStyle]}
                       resizeMode="contain"
                     />
                   </Animated.View>
                 </GestureDetector>
-              ) : (
-                <View style={styles.ticketFallback}>
-                  <Text>No ticket image available</Text>
-                </View>
               )}
             </View>
           </View>
@@ -565,27 +915,64 @@ const styles = StyleSheet.create({
   },
   muted: { color: "#6B7280", fontSize: 13 },
   errorText: { color: "#E53935", fontWeight: "700", textAlign: "center" },
-  ticketWrap: {
+  ticketBox: {
     width: "100%",
     borderRadius: 12,
+    overflow: "hidden",
+    marginTop: 10,
+    marginBottom: 24,
+    backgroundColor: "#F9FAFB",
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    backgroundColor: "#F9FAFB",
-    padding: 10,
-    marginBottom: 16,
+  },
+  ticketPressable: {
+    width: "100%",
+  },
+  ticketInnerShadow: {
+    padding: 8,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 220,
   },
   ticketImage: {
     width: "100%",
-    height: 220,
+    aspectRatio: 3 / 2,
+    borderRadius: 10,
   },
-  ticketFallback: {
+  tapHint: {
+    fontSize: 12,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingBottom: 8,
+  },
+  ticketPlaceholder: {
     width: "100%",
-    height: 220,
+    paddingVertical: 40,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#F9FAFB",
+  },
+  placeholderText: {
+    fontSize: 13,
+    color: "#9CA3AF",
+  },
+  paginationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 16,
+  },
+  pageBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "#E5E7EB",
+  },
+  pageLabel: {
+    fontSize: 12,
+    color: "#4B5563",
+    fontWeight: "600",
   },
   badgeRow: {
     alignItems: "center",
@@ -628,37 +1015,38 @@ const styles = StyleSheet.create({
   ctaText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalSheet: {
-    width: "92%",
-    height: "80%",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 6,
+    backgroundColor: "rgba(0,0,0,0.85)",
   },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#EEE",
+    paddingHorizontal: 16,
+    paddingTop: 40,
+    paddingBottom: 12,
   },
-  modalTitle: { fontSize: 16, fontWeight: "700" },
-  closeBtn: { padding: 6, borderRadius: 8 },
-  zoomWrap: {
+  modalCloseBtn: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  modalTitle: {
     flex: 1,
+    textAlign: "center",
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  modalScroll: {
+    flex: 1,
+  },
+  modalContent: {
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#000",
+    padding: 16,
   },
-  zoomImage: { width: "100%", aspectRatio: 3 / 2 },
+  modalImage: {
+    width: "100%",
+    aspectRatio: 3 / 2,
+  },
 });

@@ -1,4 +1,3 @@
-// app/views/approveTicket.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
@@ -41,13 +40,12 @@ export default function ApproveTicket() {
     eventId?: string;
     seasonId?: string;
     eventName?: string;
-    items?: string;        // JSON string of UITicket[]
-    initialIndex?: string; // which ticket user was on
+    items?: string;
+    initialIndex?: string;
     bundleId?: string;
-    ticketId?: string;     // fallback
+    ticketId?: string;
   }>();
 
-  // --------- Basic params ---------
   const rawStatus = Array.isArray(params.status)
     ? params.status[0]
     : params.status;
@@ -79,7 +77,6 @@ export default function ApproveTicket() {
   const bundleId = (rawBundleId || "").trim() || null;
   const eventName = rawEventName || "";
 
-  // --------- Items + index from ConfirmPayment ---------
   const rawItems = Array.isArray(params.items) ? params.items[0] : params.items;
   const rawInitialIndex = Array.isArray(params.initialIndex)
     ? params.initialIndex[0]
@@ -103,7 +100,6 @@ export default function ApproveTicket() {
     return n;
   })();
 
-  // ✅ Allow changing index now
   const [currentIndex, setCurrentIndex] = useState<number>(initialIndex);
   const currentTicket = items[currentIndex];
 
@@ -127,7 +123,6 @@ export default function ApproveTicket() {
     });
   };
 
-  // For Redeem All, collect all IDs (fallback if no bundleId)
   const allTicketIds: string[] =
     items.length > 0
       ? items.map((t) => t.id).filter(Boolean)
@@ -135,13 +130,10 @@ export default function ApproveTicket() {
       ? [rawTicketIdParam]
       : [];
 
-  // Zoom modal state
   const [zoomVisible, setZoomVisible] = useState(false);
 
-  // Redeem-all busy flag
   const [redeemBusy, setRedeemBusy] = useState(false);
 
-  // --------- Zoom + Pan shared values (same logic as ConfirmVoucher) ---------
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -186,16 +178,13 @@ export default function ApproveTicket() {
     ],
   }));
 
-  // --------- Header text + color ---------
   const header = useMemo(() => {
     if (status === "active") {
       return { text: "Tickets Created!", color: "#071689" };
     }
-    // status === "redeemed"
     return { text: "Tickets Redeemed!", color: "#071689" };
   }, [status]);
 
-  // --------- Subtitle text ---------
   const subtitle = useMemo(() => {
     if (status === "active") {
       return "The tickets have been purchased successfully.";
@@ -203,26 +192,21 @@ export default function ApproveTicket() {
     return "All tickets in this purchase have been redeemed.";
   }, [status]);
 
-  // --------- Navigation helpers ---------
   const handleTopBack = () => {
-    // After purchase, going back should just reset to create or home
     router.replace("/views/createTicket");
   };
 
   const goHome = () => router.replace("/views/welcome");
   const createNextTicket = () => router.replace("/views/createTicket");
 
-  // --------- Redeem ALL tickets in this purchase ---------
   const handleRedeemNow = async () => {
     if (redeemBusy || status === "redeemed") return;
 
     try {
       setRedeemBusy(true);
 
-      // Only hit backend if we have event + season + at least some reference
       if (eventId && seasonId) {
         if (bundleId) {
-          // ✅ Redeem the entire bundle in one go
           await scannerApi.confirmTickets(
             eventId,
             seasonId,
@@ -231,7 +215,6 @@ export default function ApproveTicket() {
             "redeemed"
           );
         } else if (allTicketIds.length > 0) {
-          // ✅ Redeem all ticket IDs we know about
           await scannerApi.confirmTickets(
             eventId,
             seasonId,
@@ -258,9 +241,14 @@ export default function ApproveTicket() {
     }
   };
 
+  const resetZoom = () => {
+    scale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Top bar */}
       <View style={styles.topBar}>
         <Pressable
           onPress={handleTopBack}
@@ -276,7 +264,6 @@ export default function ApproveTicket() {
       </View>
 
       <View style={styles.content}>
-        {/* Body area → event name, preview, card */}
         <View style={{ flex: 1 }}>
           {!!eventName && (
             <Text style={styles.eventName} numberOfLines={2}>
@@ -284,68 +271,71 @@ export default function ApproveTicket() {
             </Text>
           )}
 
-          {/* Ticket preview (single ticket, but indexable) */}
-          {previewUrl && (
-            <View style={styles.ticketBox}>
-              <Pressable
-                onPress={() => {
-                  // reset zoom before opening
-                  scale.value = 1;
-                  translateX.value = 0;
-                  translateY.value = 0;
-                  setZoomVisible(true);
-                }}
-                style={styles.ticketPressable}
-              >
-                <View style={styles.ticketInnerShadow}>
-                  <Image
-                    source={{ uri: previewUrl }}
-                    style={styles.ticketImage}
-                    resizeMode="contain"
-                  />
-                </View>
-              </Pressable>
-              <Text style={styles.tapHint}>Tap ticket to zoom</Text>
-
-              {hasMultiple && (
-                <View style={styles.paginationRow}>
-                  <Pressable
-                    onPress={handlePrevTicket}
-                    style={({ pressed }) => [
-                      styles.pageBtn,
-                      pressed && { opacity: 0.7 },
-                    ]}
-                    hitSlop={8}
-                  >
-                    <Ionicons
-                      name="chevron-back"
-                      size={18}
-                      color="#374151"
+          <View style={styles.ticketBox}>
+            {previewUrl ? (
+              <>
+                <Pressable
+                  onPress={() => {
+                    resetZoom();
+                    setZoomVisible(true);
+                  }}
+                  style={styles.ticketPressable}
+                >
+                  <View style={styles.ticketInnerShadow}>
+                    <Image
+                      source={{ uri: previewUrl }}
+                      style={styles.ticketImage}
+                      resizeMode="contain"
                     />
-                  </Pressable>
-                  <Text style={styles.pageLabel}>
-                    Ticket {currentIndex + 1} of {items.length}
-                  </Text>
-                  <Pressable
-                    onPress={handleNextTicket}
-                    style={({ pressed }) => [
-                      styles.pageBtn,
-                      pressed && { opacity: 0.7 },
-                    ]}
-                    hitSlop={8}
-                  >
-                    <Ionicons
-                      name="chevron-forward"
-                      size={18}
-                      color="#374151"
-                    />
-                  </Pressable>
-                </View>
-              )}
-            </View>
-          )}
+                  </View>
+                </Pressable>
+                <Text style={styles.tapHint}>Tap ticket to zoom</Text>
 
-          {/* Confirmation card */}
+                {hasMultiple && (
+                  <View style={styles.paginationRow}>
+                    <Pressable
+                      onPress={handlePrevTicket}
+                      style={({ pressed }) => [
+                        styles.pageBtn,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name="chevron-back"
+                        size={18}
+                        color="#374151"
+                      />
+                    </Pressable>
+                    <Text style={styles.pageLabel}>
+                      Ticket {currentIndex + 1} of {items.length}
+                    </Text>
+                    <Pressable
+                      onPress={handleNextTicket}
+                      style={({ pressed }) => [
+                        styles.pageBtn,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name="chevron-forward"
+                        size={18}
+                        color="#374151"
+                      />
+                    </Pressable>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.ticketPlaceholder}>
+                <Text style={styles.placeholderText}>
+                  Ticket image not available
+                </Text>
+              </View>
+            )}
+          </View>
+
           <View style={styles.card}>
             <View style={styles.iconCircle}>
               <Ionicons name="checkmark-circle" size={48} color="#071689" />
@@ -355,7 +345,6 @@ export default function ApproveTicket() {
           </View>
         </View>
 
-        {/* Actions */}
         <View style={styles.row}>
           <Pressable onPress={goHome} style={[styles.cta, styles.ghost]}>
             <Text style={[styles.ctaText, { color: "#111" }]}>
@@ -370,7 +359,6 @@ export default function ApproveTicket() {
           </Pressable>
         </View>
 
-        {/* Redeem All button (only if still active) */}
         {status === "active" && (
           <Pressable
             onPress={handleRedeemNow}
@@ -390,7 +378,6 @@ export default function ApproveTicket() {
         )}
       </View>
 
-      {/* Full-screen zoom modal for ticket image */}
       <Modal
         visible={zoomVisible}
         transparent
@@ -486,7 +473,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6B7280",
     textAlign: "center",
-    paddingBottom: 4,
+    paddingBottom: 8,
+  },
+  ticketPlaceholder: {
+    width: "100%",
+    paddingVertical: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F9FAFB",
+  },
+  placeholderText: {
+    fontSize: 13,
+    color: "#9CA3AF",
   },
 
   paginationRow: {

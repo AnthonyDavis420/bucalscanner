@@ -243,15 +243,17 @@ export const scannerApi = {
   async fetchTickets(
     eventId: string,
     seasonId: string,
-    ids: string[]
+    ids: string[] = []
   ): Promise<{ ok: true; items: TicketSummary[] }> {
-    const qs = new URLSearchParams({ seasonId, ids: ids.join(",") }).toString();
+    const sp = new URLSearchParams({ seasonId });
+    if (ids.length > 0) sp.set("ids", ids.join(","));
     return getJson<{ ok: true; items: TicketSummary[] }>(
       `/api/scanner/event-details/${encodeURIComponent(
         eventId
-      )}/tickets?${qs}`
+      )}/tickets?${sp.toString()}`
     );
   },
+
 
   async fetchVoucher(
     eventId: string,
