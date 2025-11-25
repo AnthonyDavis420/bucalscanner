@@ -46,6 +46,18 @@ type SeatOption = {
   teamName?: string | null;
 };
 
+const clearActiveEventStorage = async () => {
+  try {
+    await AsyncStorage.multiRemove([
+      STORAGE_KEYS.eventId,
+      STORAGE_KEYS.seasonId,
+      STORAGE_KEYS.eventName,
+    ]);
+  } catch {
+  }
+};
+
+
 export default function CreateTicket() {
   const [backDisabled, setBackDisabled] = useState(false);
   useFocusEffect(
@@ -300,8 +312,10 @@ export default function CreateTicket() {
   const confirmBack = () => {
     setBackWarnVisible(false);
     setBackDisabled(true);
-    router.replace("/views/welcome");
-    setTimeout(() => setBackDisabled(false), 450);
+    clearActiveEventStorage().finally(() => {
+      router.replace("/views/welcome");
+      setTimeout(() => setBackDisabled(false), 450);
+    });
   };
 
   const cancelBack = () => setBackWarnVisible(false);

@@ -76,7 +76,7 @@ export default function ConfirmPayment() {
   const eventTitle = String(params.eventName || ""); // use real event name if the previous screen passes it
 
   const goBackToCreate = useCallback(() => {
-    router.replace("/views/createTicket");
+    router.back();
   }, []);
 
   const cancelProvisional = useCallback(async () => {

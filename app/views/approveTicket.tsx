@@ -13,6 +13,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi } from "../../lib/api";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 type TicketStatus = "active" | "redeemed";
 
@@ -93,12 +103,29 @@ export default function ApproveTicket() {
     return n;
   })();
 
-  // We don't allow changing index here; just show the ticket user last viewed
-  const [currentIndex] = useState<number>(initialIndex);
+  // ✅ Allow changing index now
+  const [currentIndex, setCurrentIndex] = useState<number>(initialIndex);
   const currentTicket = items[currentIndex];
 
-  const previewUrl =
-    currentTicket?.url || rawTicketUrlParam || null;
+  const previewUrl = currentTicket?.url || rawTicketUrlParam || null;
+
+  const hasMultiple = items.length > 1;
+
+  const handlePrevTicket = () => {
+    if (!hasMultiple) return;
+    setCurrentIndex((prev) => {
+      if (prev <= 0) return items.length - 1;
+      return prev - 1;
+    });
+  };
+
+  const handleNextTicket = () => {
+    if (!hasMultiple) return;
+    setCurrentIndex((prev) => {
+      if (prev >= items.length - 1) return 0;
+      return prev + 1;
+    });
+  };
 
   // For Redeem All, collect all IDs (fallback if no bundleId)
   const allTicketIds: string[] =
@@ -113,6 +140,51 @@ export default function ApproveTicket() {
 
   // Redeem-all busy flag
   const [redeemBusy, setRedeemBusy] = useState(false);
+
+  // --------- Zoom + Pan shared values (same logic as ConfirmVoucher) ---------
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const pinch = Gesture.Pinch()
+    .onStart(() => {
+      savedScale.value = scale.value;
+    })
+    .onUpdate((e) => {
+      scale.value = savedScale.value * e.scale;
+    })
+    .onEnd(() => {
+      if (scale.value < 1) {
+        scale.value = withTiming(1);
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+      } else if (scale.value > 4) {
+        scale.value = withTiming(4);
+      }
+    });
+
+  const pan = Gesture.Pan()
+    .onStart(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    })
+    .onUpdate((e) => {
+      translateX.value = savedTranslateX.value + e.translationX;
+      translateY.value = savedTranslateY.value + e.translationY;
+    });
+
+  const composedGesture = Gesture.Simultaneous(pinch, pan);
+
+  const animatedImageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
 
   // --------- Header text + color ---------
   const header = useMemo(() => {
@@ -212,11 +284,17 @@ export default function ApproveTicket() {
             </Text>
           )}
 
-          {/* Ticket preview (single ticket) */}
+          {/* Ticket preview (single ticket, but indexable) */}
           {previewUrl && (
             <View style={styles.ticketBox}>
               <Pressable
-                onPress={() => setZoomVisible(true)}
+                onPress={() => {
+                  // reset zoom before opening
+                  scale.value = 1;
+                  translateX.value = 0;
+                  translateY.value = 0;
+                  setZoomVisible(true);
+                }}
                 style={styles.ticketPressable}
               >
                 <View style={styles.ticketInnerShadow}>
@@ -228,6 +306,42 @@ export default function ApproveTicket() {
                 </View>
               </Pressable>
               <Text style={styles.tapHint}>Tap ticket to zoom</Text>
+
+              {hasMultiple && (
+                <View style={styles.paginationRow}>
+                  <Pressable
+                    onPress={handlePrevTicket}
+                    style={({ pressed }) => [
+                      styles.pageBtn,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                    hitSlop={8}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={18}
+                      color="#374151"
+                    />
+                  </Pressable>
+                  <Text style={styles.pageLabel}>
+                    Ticket {currentIndex + 1} of {items.length}
+                  </Text>
+                  <Pressable
+                    onPress={handleNextTicket}
+                    style={({ pressed }) => [
+                      styles.pageBtn,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                    hitSlop={8}
+                  >
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color="#374151"
+                    />
+                  </Pressable>
+                </View>
+              )}
             </View>
           )}
 
@@ -283,7 +397,7 @@ export default function ApproveTicket() {
         animationType="fade"
         onRequestClose={() => setZoomVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
+        <GestureHandlerRootView style={styles.modalBackdrop}>
           <View style={styles.modalHeader}>
             <Pressable
               onPress={() => setZoomVisible(false)}
@@ -298,15 +412,19 @@ export default function ApproveTicket() {
           <View style={styles.modalScroll}>
             <View style={styles.modalContent}>
               {previewUrl && (
-                <Image
-                  source={{ uri: previewUrl }}
-                  style={styles.modalImage}
-                  resizeMode="contain"
-                />
+                <GestureDetector gesture={composedGesture}>
+                  <Animated.View collapsable={false}>
+                    <Animated.Image
+                      source={{ uri: previewUrl }}
+                      style={[styles.modalImage, animatedImageStyle]}
+                      resizeMode="contain"
+                    />
+                  </Animated.View>
+                </GestureDetector>
               )}
             </View>
           </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
     </SafeAreaView>
   );
@@ -368,7 +486,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6B7280",
     textAlign: "center",
+    paddingBottom: 4,
+  },
+
+  paginationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
     paddingBottom: 8,
+    gap: 16,
+  },
+  pageBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "#E5E7EB",
+  },
+  pageLabel: {
+    fontSize: 12,
+    color: "#4B5563",
+    fontWeight: "600",
   },
 
   card: {

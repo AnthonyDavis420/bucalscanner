@@ -7,13 +7,22 @@ import {
   Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi, type TicketSummary } from "../../lib/api";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 type TicketStatus =
   | "active"
@@ -41,8 +50,7 @@ export default function ConfirmTicket() {
   const isCreateMode = mode === "create";
 
   const [status, setStatus] = useState<TicketStatus>(
-    (Array.isArray(params.status) ? params.status[0] : params.status) ??
-      "active"
+    (Array.isArray(params.status) ? params.status[0] : params.status) ?? "active"
   );
   const [ticket, setTicket] = useState<TicketSummary | null>(null);
   const [loading, setLoading] = useState<boolean>(isScanMode);
@@ -287,6 +295,50 @@ export default function ConfirmTicket() {
 
   const showPriorityBadge = effectiveType === "priority";
 
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const pinch = Gesture.Pinch()
+    .onStart(() => {
+      savedScale.value = scale.value;
+    })
+    .onUpdate((e) => {
+      scale.value = savedScale.value * e.scale;
+    })
+    .onEnd(() => {
+      if (scale.value < 1) {
+        scale.value = withTiming(1);
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+      } else if (scale.value > 4) {
+        scale.value = withTiming(4);
+      }
+    });
+
+  const pan = Gesture.Pan()
+    .onStart(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    })
+    .onUpdate((e) => {
+      translateX.value = savedTranslateX.value + e.translationX;
+      translateY.value = savedTranslateY.value + e.translationY;
+    });
+
+  const composedGesture = Gesture.Simultaneous(pinch, pan);
+
+  const animatedImageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.topBar}>
@@ -320,7 +372,12 @@ export default function ConfirmTicket() {
             <Pressable
               style={styles.ticketWrap}
               onPress={() => {
-                if (ticketImageUrl) setZoomOpen(true);
+                if (ticketImageUrl) {
+                  scale.value = 1;
+                  translateX.value = 0;
+                  translateY.value = 0;
+                  setZoomOpen(true);
+                }
               }}
             >
               {ticketImageUrl ? (
@@ -442,7 +499,7 @@ export default function ConfirmTicket() {
         animationType="fade"
         onRequestClose={() => setZoomOpen(false)}
       >
-        <View style={styles.modalBackdrop}>
+        <GestureHandlerRootView style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Ticket Preview</Text>
@@ -454,29 +511,25 @@ export default function ConfirmTicket() {
                 <Ionicons name="close" size={22} color="#111" />
               </Pressable>
             </View>
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={styles.zoomWrap}
-              minimumZoomScale={1}
-              maximumZoomScale={3}
-              showsVerticalScrollIndicator={false}
-              showsHorizontalScrollIndicator={false}
-              bouncesZoom
-            >
+            <View style={styles.zoomWrap}>
               {ticketImageUrl ? (
-                <Image
-                  source={{ uri: ticketImageUrl }}
-                  style={styles.zoomImage}
-                  resizeMode="contain"
-                />
+                <GestureDetector gesture={composedGesture}>
+                  <Animated.View collapsable={false}>
+                    <Animated.Image
+                      source={{ uri: ticketImageUrl }}
+                      style={[styles.zoomImage, animatedImageStyle]}
+                      resizeMode="contain"
+                    />
+                  </Animated.View>
+                </GestureDetector>
               ) : (
                 <View style={styles.ticketFallback}>
                   <Text>No ticket image available</Text>
                 </View>
               )}
-            </ScrollView>
+            </View>
           </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
     </SafeAreaView>
   );
@@ -602,10 +655,10 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 16, fontWeight: "700" },
   closeBtn: { padding: 6, borderRadius: 8 },
   zoomWrap: {
-    flexGrow: 1,
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#000",
   },
-  zoomImage: { width: "100%", height: "100%" },
+  zoomImage: { width: "100%", aspectRatio: 3 / 2 },
 });
