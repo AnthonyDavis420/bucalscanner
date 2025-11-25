@@ -20,12 +20,14 @@ const STORAGE_KEYS = {
   eventName: "bucalscanner.activeEventName",
 };
 
+const BLUE = "#071689";
+const LIGHT_BLUE = "#E0E7FF"; // lighter blue for flat button
+
 export default function Welcome() {
   const [showExit, setShowExit] = useState(false);
   const [eventId, setEventId] = useState<string>("");
   const [eventName, setEventName] = useState<string>("");
 
-  // Intercept Android back button: show modal instead of navigating
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (showExit) setShowExit(false);
@@ -35,7 +37,6 @@ export default function Welcome() {
     return () => sub.remove();
   }, [showExit]);
 
-  // Load active event info
   useEffect(() => {
     (async () => {
       try {
@@ -45,9 +46,7 @@ export default function Welcome() {
         ]);
         setEventId((id?.[1] || "").trim());
         setEventName((name?.[1] || "").trim());
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     })();
   }, []);
 
@@ -59,7 +58,7 @@ export default function Welcome() {
         STORAGE_KEYS.eventName,
       ]);
     } catch {}
-    router.replace("/"); // go back to event code entry
+    router.replace("/");
   };
 
   return (
@@ -71,7 +70,6 @@ export default function Welcome() {
           resizeMode="contain"
         />
 
-        {/* Active event banner */}
         <View style={styles.banner}>
           <Text style={styles.bannerTitle}>
             {eventName ? eventName : "Active Event"}
@@ -86,7 +84,10 @@ export default function Welcome() {
 
         <View style={styles.buttonsContainer}>
           <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.buttonPressed,
+            ]}
             onPress={() => {
               if (!eventId) {
                 Alert.alert("No Event", "Please choose an event first.");
@@ -99,7 +100,10 @@ export default function Welcome() {
           </Pressable>
 
           <Pressable
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.buttonPressed,
+            ]}
             onPress={() => {
               if (!eventId) {
                 Alert.alert("No Event", "Please choose an event first.");
@@ -112,39 +116,42 @@ export default function Welcome() {
           </Pressable>
         </View>
 
-        <Pressable
-          style={({ pressed }) => [styles.viewTicketsButton, pressed && styles.buttonPressed]}
-          onPress={() => {
-            if (!eventId) {
-              Alert.alert("No Event", "Please choose an event first.");
-              return;
-            }
-            router.push("/views/allTickets");
-          }}
-        >
-          <Text style={styles.buttonText}>View Tickets</Text>
-        </Pressable>
+        {/* View Tickets + View Vouchers side by side */}
+        <View style={styles.secondaryRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.viewTicketsButton,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => {
+              if (!eventId) {
+                Alert.alert("No Event", "Please choose an event first.");
+                return;
+              }
+              router.push("/views/allTickets");
+            }}
+          >
+            <Text style={styles.buttonText}>View Tickets</Text>
+          </Pressable>
 
-        {/* NEW: View Vouchers button */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.viewTicketsButton,
-            { marginTop: 12 },
-            pressed && styles.buttonPressed,
-          ]}
-          onPress={() => {
-            if (!eventId) {
-              Alert.alert("No Event", "Please choose an event first.");
-              return;
-            }
-            router.push("/views/allVouchers");
-          }}
-        >
-          <Text style={styles.buttonText}>View Vouchers</Text>
-        </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.viewVouchersButton,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={() => {
+              if (!eventId) {
+                Alert.alert("No Event", "Please choose an event first.");
+                return;
+              }
+              router.push("/views/allVouchers");
+            }}
+          >
+            <Text style={styles.voucherButtonText}>View Vouchers</Text>
+          </Pressable>
+        </View>
       </View>
 
-      {/* Exit confirmation */}
       <Modal
         visible={showExit}
         animationType="fade"
@@ -152,7 +159,10 @@ export default function Welcome() {
         onRequestClose={() => setShowExit(false)}
       >
         <View style={styles.modalBackdrop}>
-          <Pressable style={styles.modalBackdropTap} onPress={() => setShowExit(false)} />
+          <Pressable
+            style={styles.modalBackdropTap}
+            onPress={() => setShowExit(false)}
+          />
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Exit app?</Text>
             <Text style={styles.modalText}>
@@ -165,14 +175,20 @@ export default function Welcome() {
                   setShowExit(false);
                   BackHandler.exitApp();
                 }}
-                style={({ pressed }) => [styles.modalDanger, pressed && { opacity: 0.9 }]}
+                style={({ pressed }) => [
+                  styles.modalDanger,
+                  pressed && { opacity: 0.9 },
+                ]}
               >
                 <Text style={{ color: "#fff", fontWeight: "700" }}>Exit</Text>
               </Pressable>
 
               <Pressable
                 onPress={() => setShowExit(false)}
-                style={({ pressed }) => [styles.modalPrimary, pressed && { opacity: 0.9 }]}
+                style={({ pressed }) => [
+                  styles.modalPrimary,
+                  pressed && { opacity: 0.9 },
+                ]}
               >
                 <Text style={{ color: "#fff", fontWeight: "700" }}>Stay</Text>
               </Pressable>
@@ -183,8 +199,6 @@ export default function Welcome() {
     </SafeAreaView>
   );
 }
-
-const BLUE = "#071689";
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
@@ -218,7 +232,7 @@ const styles = StyleSheet.create({
   },
   changeBtnText: { color: BLUE, fontWeight: "700", fontSize: 12 },
 
-  buttonsContainer: { width: "100%", marginBottom: 32 },
+  buttonsContainer: { width: "100%", marginBottom: 24 },
   button: {
     width: "100%",
     height: 70,
@@ -228,18 +242,39 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 16,
   },
-  viewTicketsButton: {
+
+  secondaryRow: {
     width: "100%",
+    flexDirection: "row",
+    gap: 12,
+  },
+
+  // solid primary button (View Tickets)
+  viewTicketsButton: {
+    flex: 1,
     height: 52,
     borderRadius: 10,
     backgroundColor: BLUE,
     alignItems: "center",
     justifyContent: "center",
   },
+
+  // flat light-blue button (View Vouchers)
+  viewVouchersButton: {
+    flex: 1,
+    height: 52,
+    borderRadius: 10,
+    backgroundColor: LIGHT_BLUE,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#C7D2FE",
+  },
+
   buttonPressed: { opacity: 0.85 },
   buttonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  voucherButtonText: { color: BLUE, fontSize: 16, fontWeight: "700" },
 
-  // modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.35)",
