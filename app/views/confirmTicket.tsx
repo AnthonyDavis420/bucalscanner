@@ -485,10 +485,12 @@ export default function ConfirmTicket() {
         | "priority"
         | undefined;
 
-    const isParent =
-      normalized === "adult" || normalized === "priority";
+    const isChild = normalized === "child";
 
-    if (!isParent) return;
+    // For list mode (coming from AllTickets), only auto-load bundle context
+    // when we're viewing a CHILD ticket. Adult/priority "Adult only" should
+    // stay truly single.
+    if (!isChild) return;
     if (!eventIdFromParams || !seasonIdFromParams) return;
 
     let cancelled = false;
@@ -501,6 +503,7 @@ export default function ConfirmTicket() {
           []
         );
         const items = Array.isArray(res.items) ? res.items : [];
+
         const bundleItems = items.filter((src: TicketSummary) => {
           const srcBundle = (src as any).bundleId;
           if (!srcBundle || String(srcBundle) !== bundleId) return false;
@@ -526,7 +529,9 @@ export default function ConfirmTicket() {
           setBundleTickets(sorted as BundleTicket[]);
         }
       } catch (e) {
+        // ignore for now
       } finally {
+        // no-op
       }
     })();
 
