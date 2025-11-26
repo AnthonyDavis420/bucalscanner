@@ -1,4 +1,3 @@
-// app/views/scanner.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useIsFocused } from "@react-navigation/native";
@@ -59,13 +58,6 @@ function showStatusAlert(
 
 function getTicketStatus(t: TicketSummary | undefined): string {
   return normalizeStatus((t as any)?.status);
-}
-
-function getParentTicketId(t: TicketSummary | undefined): string | null {
-  if (!t) return null;
-  const v = (t.parentTicketId ?? (t as any).parent_ticket_id) as any;
-  const s = v != null ? String(v).trim() : "";
-  return s || null;
 }
 
 export default function Scanner() {
@@ -157,7 +149,6 @@ export default function Scanner() {
       const activeEventId = (eventId || "").trim();
       const activeSeasonId = (seasonId || "").trim();
 
-      // 1) VOUCHER FLOW
       if (hasVoucherHint && !hasTicketHint) {
         const voucherIdFromCode = String(
           parsed.voucherId ?? parsed.voucher_id ?? ""
@@ -233,7 +224,6 @@ export default function Scanner() {
         return;
       }
 
-      // 2) TICKET FLOW
       const seasonFromCode = String(
         parsed.seasonId ?? parsed.season_id ?? seasonId ?? ""
       ).trim();
@@ -281,27 +271,15 @@ export default function Scanner() {
           }
 
           const status = getTicketStatus(t);
-          const parentTicketId = getParentTicketId(t);
-          const role = normalizeStatus((t as any).role);
-          const type = normalizeStatus((t as any).type);
-          const isChildFlag = (t as any).isChild === true;
           const bundleIdFromTicket = String(
             (t as any).bundleId ?? (t as any).bundle_id ?? ""
           ).trim();
 
-          console.log(
-            "TICKET STATUS/ROLE/PTID/TYPE/BUNDLE:",
-            {
-              status,
-              role,
-              parentTicketId,
-              type,
-              bundleIdFromTicket,
-              isChildFlag,
-            }
-          );
+          console.log("TICKET STATUS/BUNDLE:", {
+            status,
+            bundleIdFromTicket,
+          });
 
-          // 🔵 Reservation / pending logic
           if (status === "pending") {
             if (bundleIdFromTicket) {
               try {
@@ -314,30 +292,20 @@ export default function Scanner() {
                   ? bundleRes.items
                   : [];
 
-                const bundleTickets = items.filter(
-                  (x: TicketSummary) => {
-                    const anyX = x as any;
-                    const rawBundle =
-                      anyX.bundleId ??
-                      anyX.bundle_id ??
-                      null;
-                    const xBundle =
-                      rawBundle != null
-                        ? String(rawBundle).trim()
-                        : "";
-                    return (
-                      xBundle &&
-                      xBundle === bundleIdFromTicket
-                    );
-                  }
-                );
+                const bundleTickets = items.filter((x: TicketSummary) => {
+                  const anyX = x as any;
+                  const rawBundle =
+                    anyX.bundleId ?? anyX.bundle_id ?? null;
+                  const xBundle =
+                    rawBundle != null ? String(rawBundle).trim() : "";
+                  return xBundle && xBundle === bundleIdFromTicket;
+                });
 
                 console.log(
                   "BUNDLE ITEMS COUNT (scanner):",
                   bundleTickets.length
                 );
 
-                // If multiple tickets share this bundleId → go to ConfirmBundle
                 if (bundleTickets.length > 1) {
                   router.push({
                     pathname: "/views/confirmBundle",
@@ -354,13 +322,10 @@ export default function Scanner() {
                 }
               } catch (err) {
                 console.log("BUNDLE LOOKUP ERROR:", err);
-                // fall through to single reservation if something fails
               }
             }
 
-            // Single pending reservation → ConfirmReserved
-            const guestName =
-              (t as any).assignedName || "Guest";
+            const guestName = (t as any).assignedName || "Guest";
             const price = (t as any).price;
             const sectionName = (t as any).sectionName ?? "";
             const sideLabel = (t as any).sideLabel ?? "";
@@ -382,11 +347,9 @@ export default function Scanner() {
                 section: sectionName,
                 side: sideLabel,
                 totalAmount:
-                  typeof price === "number"
-                    ? String(price)
-                    : "",
+                  typeof price === "number" ? String(price) : "",
                 refNumber: ticketIdFromCode,
-                source: "scanner", 
+                source: "scanner",
               },
             });
             return;
@@ -401,7 +364,6 @@ export default function Scanner() {
             return;
           }
 
-          // 🔴 Special handling for INVALID tickets
           if (!status || status !== "active") {
             if (status === "invalid") {
               Alert.alert(
@@ -420,8 +382,7 @@ export default function Scanner() {
                         params: {
                           mode: "scan",
                           code: encodedPayload,
-                          eventName:
-                            eventName || "Event Ticket",
+                          eventName: eventName || "Event Ticket",
                         },
                       });
                     },
@@ -434,62 +395,6 @@ export default function Scanner() {
             return;
           }
 
-          // Active child tickets → require adult redeemed first
-          const isChildTicketActive =
-            isChildFlag || !!parentTicketId || type === "child";
-
-          if (isChildTicketActive) {
-            if (!parentTicketId) {
-              Alert.alert(
-                "Sponsor Not Found",
-                "Sponsor ticket not found for this bundle. Please refer to the help desk."
-              );
-              return;
-            }
-
-            try {
-              const parentRes = await scannerApi.fetchTickets(
-                eventFromCode,
-                seasonFromCode,
-                [parentTicketId]
-              );
-              const parent = (parentRes.items || [])[0] as
-                | TicketSummary
-                | undefined;
-
-              console.log("PARENT TICKET:", parent);
-
-              if (!parent) {
-                Alert.alert(
-                  "Sponsor Not Found",
-                  "Sponsor ticket not found for this bundle. Please refer to the help desk."
-                );
-                return;
-              }
-
-              const parentStatus = getTicketStatus(parent);
-              console.log("PARENT STATUS:", parentStatus);
-
-              if (!["redeemed", "used"].includes(parentStatus)) {
-                Alert.alert(
-                  "Adult Ticket Not Redeemed",
-                  "Please scan and redeem the adult ticket first before scanning child tickets.",
-                  [{ text: "OK" }]
-                );
-                return;
-              }
-            } catch (err: any) {
-              console.log("PARENT VALIDATION ERROR:", err);
-              Alert.alert(
-                "Error",
-                err?.message ||
-                  "Failed to validate sponsor ticket. Please try again."
-              );
-              return;
-            }
-          }
-
-          // ✅ All checks passed for this active ticket → confirmTicket
           router.push({
             pathname: "/views/confirmTicket",
             params: {
@@ -509,7 +414,6 @@ export default function Scanner() {
         }
       }
 
-      // Fallback: if ticket IDs are not present in the payload, still allow confirm screen.
       if (!seasonFromCode || !eventFromCode || !ticketIdFromCode) {
         router.push({
           pathname: "/views/confirmTicket",
@@ -529,9 +433,7 @@ export default function Scanner() {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>
-          Requesting camera permission…
-        </Text>
+        <Text style={{ marginTop: 8 }}>Requesting camera permission…</Text>
       </SafeAreaView>
     );
   }
@@ -539,9 +441,7 @@ export default function Scanner() {
   if (!permission.granted) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={{ marginBottom: 12 }}>
-          Camera access is required
-        </Text>
+        <Text style={{ marginBottom: 12 }}>Camera access is required</Text>
         <Pressable style={styles.primaryBtn} onPress={requestPermission}>
           <Text style={styles.primaryBtnText}>Grant Permission</Text>
         </Pressable>
@@ -589,7 +489,6 @@ export default function Scanner() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
-
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -608,21 +507,17 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#071689",
   },
-
   headerSeparator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: "#E5E7EB",
   },
-
   content: {
     flex: 1,
     paddingHorizontal: 16,
     paddingTop: 18,
     alignItems: "center",
   },
-
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-
   scannerBox: {
     width: "100%",
     aspectRatio: 1,
@@ -631,7 +526,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
     marginBottom: 24,
   },
-
   primaryBtn: {
     flexDirection: "row",
     width: "100%",
@@ -644,7 +538,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   primaryBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-
   secondaryBtn: {
     flexDirection: "row",
     width: "100%",

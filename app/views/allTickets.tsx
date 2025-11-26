@@ -23,7 +23,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi, type TicketSummary } from "@/lib/api";
 
 type TicketStatus = "active" | "pending" | "redeemed" | "invalid" | "expired";
-
 type TicketType = "adult" | "child" | "priority";
 
 type Ticket = {
@@ -56,6 +55,7 @@ type TicketRow =
       priceTotal?: number | null;
       tickets: Ticket[];
       allSameStatus: boolean;
+      parentTicketId: string | null;
     };
 
 const STORAGE_KEYS = {
@@ -101,6 +101,7 @@ function mapTicketSummary(src: TicketSummary): Ticket {
       break;
     case "expired":
     case "cancelled":
+    case "canceled":
       status = "expired";
       break;
     default:
@@ -108,8 +109,28 @@ function mapTicketSummary(src: TicketSummary): Ticket {
   }
 
   const createdAt = Date.now();
-  const bundleId = (src as any).bundleId ?? null;
-  const parentTicketId = (src as any).parentTicketId ?? null;
+
+  const rawType = String((src as any).type || "").toLowerCase();
+  const type: TicketType | undefined =
+    rawType === "adult" || rawType === "child" || rawType === "priority"
+      ? (rawType as TicketType)
+      : undefined;
+
+  const rawBundle =
+    (src as any).bundleId ?? (src as any).bundle_id ?? null;
+  const bundleId =
+    rawBundle != null && String(rawBundle).trim()
+      ? String(rawBundle).trim()
+      : null;
+
+  const rawParent =
+    (src as any).parentTicketId ??
+    (src as any).parent_ticket_id ??
+    null;
+  const parentTicketId =
+    rawParent != null && String(rawParent).trim()
+      ? String(rawParent).trim()
+      : null;
 
   return {
     id: src.id,
@@ -120,7 +141,7 @@ function mapTicketSummary(src: TicketSummary): Ticket {
     sectionName: src.sectionName ?? null,
     sideLabel: src.sideLabel ?? null,
     price: src.price ?? null,
-    type: src.type as TicketType | undefined,
+    type,
     bundleId,
     parentTicketId,
   };
@@ -282,16 +303,22 @@ export default function AllTickets() {
           (t) => t.status === sortedGroup[0].status
         );
 
+        const parentTicket =
+          sortedGroup.find(
+            (t) => t.type === "adult" || t.type === "priority"
+          ) ?? sortedGroup[0];
+
         out.push({
           kind: "bundle",
           key,
           bundleId: key,
-          primaryName: sortedGroup[0].holderName,
-          status: sortedGroup[0].status,
+          primaryName: parentTicket.holderName,
+          status: parentTicket.status,
           count: sortedGroup.length,
           priceTotal: Number.isFinite(totalPrice) ? totalPrice : null,
           tickets: sortedGroup,
           allSameStatus,
+          parentTicketId: parentTicket.id,
         });
       }
     }
@@ -328,9 +355,12 @@ export default function AllTickets() {
   };
 
   const handlePressTicket = (item: Ticket) => {
-    const isChild = item.type === "child";
+    const typeNorm = (item.type || "").toString().toLowerCase() as
+      | TicketType
+      | "";
+    const isChild = typeNorm === "child";
     const isAdultLike =
-      item.type === "adult" || item.type === "priority" || !item.type;
+      typeNorm === "adult" || typeNorm === "priority" || !typeNorm;
 
     const baseParams: any = {
       eventId,
@@ -342,6 +372,9 @@ export default function AllTickets() {
       side: item.sideLabel ?? item.sectionName ?? "",
       status: item.status,
     };
+
+    if (item.bundleId) baseParams.bundleId = item.bundleId;
+    if (item.parentTicketId) baseParams.parentTicketId = item.parentTicketId;
 
     if (item.status === "pending") {
       if (isChild && item.bundleId) {
@@ -431,8 +464,6 @@ export default function AllTickets() {
                 params: {
                   ...baseParams,
                   mode: "list",
-                  bundleId: item.bundleId!,
-                  parentTicketId: item.id,
                 },
               });
             },
@@ -489,19 +520,20 @@ export default function AllTickets() {
           bundleId: row.bundleId,
         },
       });
-    } else {
-      router.push({
-        pathname: "/views/confirmTicket",
-        params: {
-          eventId,
-          seasonId,
-          eventName,
-          bundleId: row.bundleId,
-          mode: "bundle",
-          status: row.status,
-        },
-      });
+      return;
     }
+
+    router.push({
+      pathname: "/views/confirmTicket",
+      params: {
+        eventId,
+        seasonId,
+        eventName,
+        bundleId: row.bundleId,
+        mode: "bundle",
+        status: row.status,
+      },
+    });
   };
 
   const toggleBundleExpand = (bundleId: string) => {

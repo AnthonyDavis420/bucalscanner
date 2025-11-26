@@ -34,6 +34,8 @@ type TicketStatus =
 
 type TicketType = "adult" | "child" | "priority";
 
+type UpdatableStatus = "active" | "redeemed" | "invalid";
+
 type BundleTicket = TicketSummary & {
   type?: TicketType;
 };
@@ -55,6 +57,29 @@ const ALLOWED_STATUSES: TicketStatus[] = [
   "cancelled",
   "pending",
 ];
+
+const MAX_CHILD_PER_ADULT = 3;
+
+function getBundleStats(tickets: BundleTicket[]) {
+  let redeemedAdults = 0;
+  let redeemedChildren = 0;
+  let activeAdults = 0;
+  let activeChildren = 0;
+
+  tickets.forEach((t) => {
+    const type = String(t.type || "").toLowerCase();
+    const status = String((t as any).status || "").toLowerCase();
+    const isAdult = type === "adult" || type === "priority";
+    const isChild = type === "child";
+
+    if (isAdult && status === "redeemed") redeemedAdults++;
+    if (isAdult && status === "active") activeAdults++;
+    if (isChild && status === "redeemed") redeemedChildren++;
+    if (isChild && status === "active") activeChildren++;
+  });
+
+  return { redeemedAdults, redeemedChildren, activeAdults, activeChildren };
+}
 
 export default function ConfirmTicket() {
   const params = useLocalSearchParams<{
@@ -419,7 +444,7 @@ export default function ConfirmTicket() {
   ]);
 
   useEffect(() => {
-    if (!isBundleMode || !bundleTickets.length) return;
+    if (!bundleTickets.length) return;
 
     const maxIndex = bundleTickets.length - 1;
     const safeIndex =
@@ -444,21 +469,7 @@ export default function ConfirmTicket() {
     } else {
       setStatus("active");
     }
-
-    if (eventIdFromParams && seasonIdFromParams) {
-      setCtx({
-        seasonId: seasonIdFromParams,
-        eventId: eventIdFromParams,
-        ticketId: current.id,
-      });
-    }
-  }, [
-    isBundleMode,
-    bundleTickets,
-    currentIndex,
-    eventIdFromParams,
-    seasonIdFromParams,
-  ]);
+  }, [bundleTickets, currentIndex]);
 
   useEffect(() => {
     if (isBundleMode) return;
@@ -674,10 +685,8 @@ export default function ConfirmTicket() {
     normalizedType === "adult" || normalizedType === "priority";
   const isChildType = normalizedType === "child";
 
-  const eventIdEffective =
-    eventIdFromParams || (ctx?.eventId ?? "");
-  const seasonIdEffective =
-    seasonIdFromParams || (ctx?.seasonId ?? "");
+  const eventIdEffective = eventIdFromParams || (ctx?.eventId ?? "");
+  const seasonIdEffective = seasonIdFromParams || (ctx?.seasonId ?? "");
   const activeBundleId = (bundleId || "").trim();
   const hasBundleGroup = bundleTickets.length > 0 && !!activeBundleId;
 
@@ -709,31 +718,36 @@ export default function ConfirmTicket() {
       return;
     }
 
+    // --- CHILD REDEEM GUARD (unchanged logic) ---
     if (
       nextStatus === "redeemed" &&
       isChildType &&
       hasBundleGroup &&
       bundleTickets.length > 0
     ) {
-      const anyTicket = ticket as any;
-      const parentId = String(
-        anyTicket.parentTicketId ?? anyTicket.parent_ticket_id ?? ""
-      ).trim();
-      if (parentId) {
-        const parent = bundleTickets.find((t) => t.id === parentId);
-        const parentStatus = String(
-          (parent as any)?.status || ""
-        ).toLowerCase();
-        if (parentStatus !== "redeemed") {
-          Alert.alert(
-            "Cannot redeem child ticket",
-            "This child ticket can only be redeemed when its guardian ticket is redeemed."
-          );
-          return;
-        }
+      const { redeemedAdults, redeemedChildren } = getBundleStats(bundleTickets);
+
+      if (redeemedAdults <= 0) {
+        Alert.alert(
+          "Cannot redeem child ticket",
+          "At least one adult or priority ticket in this bundle must be redeemed before redeeming child tickets."
+        );
+        return;
+      }
+
+      const nextChildren = redeemedChildren + 1;
+      const limit = redeemedAdults * MAX_CHILD_PER_ADULT;
+
+      if (nextChildren > limit) {
+        Alert.alert(
+          "Child ticket limit reached",
+          `Only ${MAX_CHILD_PER_ADULT} child tickets are allowed per adult/priority ticket in this bundle.`
+        );
+        return;
       }
     }
 
+    // --- PARENT INVALIDATION: ONLY NUKE CHILDREN WHEN LAST ADULT GOES INVALID ---
     if (
       nextStatus === "invalid" &&
       isParentType &&
@@ -743,34 +757,66 @@ export default function ConfirmTicket() {
     ) {
       try {
         setActionBusy(true);
-        const childTickets = bundleTickets.filter((t) => {
+
+        const adults = bundleTickets.filter((t) => {
+          const tType = (t.type as string | undefined)?.toLowerCase();
+          return tType === "adult" || tType === "priority";
+        });
+
+        const children = bundleTickets.filter((t) => {
           const tType = (t.type as string | undefined)?.toLowerCase();
           return tType === "child";
         });
-        const allToUpdate: BundleTicket[] = [
-          ticket as BundleTicket,
-          ...childTickets,
+
+        // simulate this parent becoming invalid
+        const updatedAdults = adults.map((a) =>
+          a.id === ticket.id
+            ? ({ ...a, status: "invalid" } as BundleTicket)
+            : a
+        );
+
+        const allAdultsInvalid = updatedAdults.every((a) => {
+          const s = String((a as any).status || "").toLowerCase();
+          return s === "invalid";
+        });
+
+        const updates: { id: string; status: UpdatableStatus }[] = [
+          { id: ticket.id, status: "invalid" },
         ];
+
+        // If this was the *last* adult/priority to go invalid,
+        // then invalidate all non-redeemed children.
+        if (allAdultsInvalid) {
+          children.forEach((child) => {
+            const s = String((child as any).status || "").toLowerCase();
+            if (s !== "redeemed") {
+              updates.push({ id: child.id, status: "invalid" });
+            }
+          });
+        }
+
         await Promise.all(
-          allToUpdate.map((t) =>
+          updates.map((u) =>
             scannerApi.updateTicketStatus(
               eventIdEffective,
               seasonIdEffective,
-              t.id,
-              "invalid"
+              u.id,
+              u.status
             )
           )
         );
+
         setStatus("invalid");
         setTicket((prev) =>
           prev ? ({ ...prev, status: "invalid" } as TicketSummary) : prev
         );
         setBundleTickets((prev) =>
-          prev.map((t) =>
-            allToUpdate.some((u) => u.id === t.id)
-              ? ({ ...t, status: "invalid" } as BundleTicket)
-              : t
-          )
+          prev.map((t) => {
+            const match = updates.find((u) => u.id === t.id);
+            return match
+              ? ({ ...t, status: match.status } as BundleTicket)
+              : t;
+          })
         );
       } catch (e: any) {
         Alert.alert(
@@ -783,40 +829,25 @@ export default function ConfirmTicket() {
       return;
     }
 
+    // --- NO CTX: just update this ticket + local bundle state, no special child logic ---
     if (!ctx) {
       setStatus(nextStatus);
       setTicket((prev) =>
         prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
       );
       if (hasBundleGroup) {
-        const isParent = isParentType && bundleTickets.length > 0;
-        if (nextStatus === "invalid" && isParent) {
-          const childIds = bundleTickets
-            .filter((t) => {
-              const tType = (t.type as string | undefined)?.toLowerCase();
-              return tType === "child";
-            })
-            .map((t) => t.id);
-          setBundleTickets((prev) =>
-            prev.map((t) =>
-              t.id === ticket.id || childIds.includes(t.id)
-                ? ({ ...t, status: nextStatus } as BundleTicket)
-                : t
-            )
-          );
-        } else {
-          setBundleTickets((prev) =>
-            prev.map((t) =>
-              t.id === ticket.id
-                ? ({ ...t, status: nextStatus } as BundleTicket)
-                : t
-            )
-          );
-        }
+        setBundleTickets((prev) =>
+          prev.map((t) =>
+            t.id === ticket.id
+              ? ({ ...t, status: nextStatus } as BundleTicket)
+              : t
+          )
+        );
       }
       return;
     }
 
+    // --- NORMAL SINGLE-TICKET REMOTE UPDATE ---
     try {
       setActionBusy(true);
       await scannerApi.updateTicketStatus(
@@ -829,7 +860,7 @@ export default function ConfirmTicket() {
       setTicket((prev) =>
         prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
       );
-      if (isBundleMode) {
+      if (hasBundleGroup) {
         setBundleTickets((prev) =>
           prev.map((t) =>
             t.id === ticket.id
@@ -856,34 +887,74 @@ export default function ConfirmTicket() {
       return;
     }
 
+    // PARENT REVERT: only mass-revert children if *previously* all adults were invalid
     if (hasBundleGroup && isParentType && eventIdEffective && seasonIdEffective) {
       try {
         setActionBusy(true);
-        const related = bundleTickets.filter((t) => {
-          if (t.id === ticket.id) return true;
+
+        const adults = bundleTickets.filter((t) => {
+          const tType = (t.type as string | undefined)?.toLowerCase();
+          return tType === "adult" || tType === "priority";
+        });
+
+        const children = bundleTickets.filter((t) => {
           const tType = (t.type as string | undefined)?.toLowerCase();
           return tType === "child";
         });
+
+        const allAdultsInvalidBefore = adults.every((a) => {
+          const s = String((a as any).status || "").toLowerCase();
+          return s === "invalid";
+        });
+
+        const updatedAdults = adults.map((a) =>
+          a.id === ticket.id
+            ? ({ ...a, status: "active" } as BundleTicket)
+            : a
+        );
+
+        const allAdultsInvalidAfter = updatedAdults.every((a) => {
+          const s = String((a as any).status || "").toLowerCase();
+          return s === "invalid";
+        });
+
+        const updates: { id: string; status: UpdatableStatus }[] = [
+          { id: ticket.id, status: "active" },
+        ];
+
+        // Only if we are *leaving* the "all adults invalid" state
+        // do we revive invalid children back to active.
+        if (allAdultsInvalidBefore && !allAdultsInvalidAfter) {
+          children.forEach((child) => {
+            const s = String((child as any).status || "").toLowerCase();
+            if (s === "invalid") {
+              updates.push({ id: child.id, status: "active" });
+            }
+          });
+        }
+
         await Promise.all(
-          related.map((t) =>
+          updates.map((u) =>
             scannerApi.updateTicketStatus(
               eventIdEffective,
               seasonIdEffective,
-              t.id,
-              "active"
+              u.id,
+              u.status
             )
           )
         );
+
         setStatus("active");
         setTicket((prev) =>
           prev ? ({ ...prev, status: "active" } as TicketSummary) : prev
         );
         setBundleTickets((prev) =>
-          prev.map((t) =>
-            related.some((r) => r.id === t.id)
-              ? ({ ...t, status: "active" } as BundleTicket)
-              : t
-          )
+          prev.map((t) => {
+            const match = updates.find((u) => u.id === t.id);
+            return match
+              ? ({ ...t, status: match.status } as BundleTicket)
+              : t;
+          })
         );
       } catch (e: any) {
         Alert.alert(
@@ -897,6 +968,7 @@ export default function ConfirmTicket() {
       return;
     }
 
+    // --- NO CTX: just revert this ticket (and its local mirror) ---
     if (!ctx) {
       setStatus("active");
       setTicket((prev) =>
@@ -914,6 +986,7 @@ export default function ConfirmTicket() {
       return;
     }
 
+    // --- NORMAL SINGLE-TICKET REMOTE REVERT ---
     try {
       setActionBusy(true);
       await scannerApi.updateTicketStatus(
@@ -967,6 +1040,32 @@ export default function ConfirmTicket() {
       Alert.alert(
         "Nothing to redeem",
         "All tickets in this group have already been updated."
+      );
+      return;
+    }
+
+    const {
+      redeemedAdults,
+      redeemedChildren,
+      activeAdults,
+      activeChildren,
+    } = getBundleStats(bundleTickets);
+
+    const finalAdults = redeemedAdults + activeAdults;
+    const finalChildren = redeemedChildren + activeChildren;
+
+    if (finalAdults <= 0) {
+      Alert.alert(
+        "Cannot redeem bundle",
+        "There are no adult or priority tickets in this bundle. At least one adult/priority ticket is required."
+      );
+      return;
+    }
+
+    if (finalChildren > finalAdults * MAX_CHILD_PER_ADULT) {
+      Alert.alert(
+        "Child ticket limit reached",
+        `Redeeming all tickets would exceed the limit of ${MAX_CHILD_PER_ADULT} child tickets per adult/priority ticket in this bundle. Please redeem only some child tickets instead.`
       );
       return;
     }
@@ -1441,7 +1540,7 @@ export default function ConfirmTicket() {
                       style={[
                         styles.cta,
                         {
-                          backgroundColor: "#6B7280",
+                          backgroundColor: "#E53935",
                           opacity: actionBusy ? 0.75 : 1,
                         },
                       ]}

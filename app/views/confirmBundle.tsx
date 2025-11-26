@@ -1,4 +1,3 @@
-// app/views/confirmBundle.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, {
@@ -31,7 +30,6 @@ import Animated, {
 } from "react-native-reanimated";
 
 type TicketStatus = "active" | "pending" | "redeemed" | "invalid" | "expired";
-
 type TicketType = "adult" | "child" | "priority";
 
 type UITicket = {
@@ -49,7 +47,6 @@ function asString(v: string | string[] | undefined, fallback = "") {
   return v ?? fallback;
 }
 
-// ---- type ordering: adult → priority → child → others ----
 function typeRank(type?: TicketType | null): number {
   if (type === "adult") return 0;
   if (type === "priority") return 1;
@@ -62,7 +59,6 @@ function sortTicketsByType(list: UITicket[]): UITicket[] {
     const ra = typeRank(a.type ?? null);
     const rb = typeRank(b.type ?? null);
     if (ra !== rb) return ra - rb;
-    // tie-breaker: seat label
     return (a.seatLabel || "").localeCompare(b.seatLabel || "");
   });
 }
@@ -113,14 +109,17 @@ export default function ConfirmBundle() {
     seasonId?: string | string[];
     eventName?: string | string[];
     bundleId?: string | string[];
-    source?: string | string[]; // 👈 NEW
+    source?: string | string[];
+    parentTicketId?: string | string[];
   }>();
 
   const eventId = asString(params.eventId, "");
   const seasonId = asString(params.seasonId, "");
   const eventName = asString(params.eventName, "");
   const bundleId = asString(params.bundleId, "");
-  const source = asString(params.source, "tickets"); // 👈 NEW
+  const source = asString(params.source, "tickets");
+  const parentTicketIdRaw = asString(params.parentTicketId, "");
+  const parentTicketId = parentTicketIdRaw.trim() || null;
 
   const [tickets, setTickets] = useState<UITicket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -188,11 +187,10 @@ export default function ConfirmBundle() {
       setLoading(true);
       setError(null);
 
-      // Fetch all tickets for this event, then filter by bundleId on client
       const res = await scannerApi.fetchTickets(eventId, seasonId, []);
       const items = Array.isArray(res.items) ? res.items : [];
 
-      let bundleItems = items.filter((src: TicketSummary) => {
+      const bundleItemsAll = items.filter((src: TicketSummary) => {
         const anySrc = src as any;
         const rawBundle =
           anySrc.bundleId ??
@@ -204,14 +202,40 @@ export default function ConfirmBundle() {
         return srcBundle && srcBundle === bundleId;
       });
 
-      console.log("BUNDLE ITEMS COUNT (ConfirmBundle):", bundleItems.length);
+      let bundleItems = bundleItemsAll;
+
+      if (parentTicketId) {
+        bundleItems = bundleItemsAll.filter((src: TicketSummary) => {
+          const anySrc = src as any;
+          const id = src.id;
+          const rawParent =
+            anySrc.parentTicketId ??
+            anySrc.parent_ticket_id ??
+            anySrc.parentID ??
+            null;
+          const srcParent =
+            rawParent != null ? String(rawParent).trim() : "";
+          if (id === parentTicketId) return true;
+          if (srcParent && srcParent === parentTicketId) return true;
+          return false;
+        });
+      }
+
+      console.log(
+        "BUNDLE ITEMS COUNT (ConfirmBundle):",
+        bundleItems.length,
+        "of",
+        bundleItemsAll.length,
+        "parentTicketId:",
+        parentTicketId
+      );
 
       if (!bundleItems.length) {
         throw new Error("No tickets found for this bundle.");
       }
 
       const mapped = bundleItems.map(mapSummaryToUi);
-      const sorted = sortTicketsByType(mapped); // adult → priority → child
+      const sorted = sortTicketsByType(mapped);
       setTickets(sorted);
       setCurrentIndex(0);
     } catch (e: any) {
@@ -220,13 +244,12 @@ export default function ConfirmBundle() {
     } finally {
       setLoading(false);
     }
-  }, [eventId, seasonId, bundleId]);
+  }, [eventId, seasonId, bundleId, parentTicketId]);
 
   useEffect(() => {
     loadTickets();
   }, [loadTickets]);
 
-  // Clamp currentIndex whenever ticket count changes
   useEffect(() => {
     if (!tickets.length) {
       setCurrentIndex(0);
@@ -286,7 +309,6 @@ export default function ConfirmBundle() {
       setFinalizing(true);
       setError(null);
 
-      // Mark all pending tickets (only the ones currently loaded) as active
       await Promise.all(
         pendingTickets.map((t) =>
           scannerApi.updateTicketStatus(
@@ -298,7 +320,6 @@ export default function ConfirmBundle() {
         )
       );
 
-      // Prepare items payload for ApproveBundle (so it can show previews immediately)
       const itemsForParam = tickets.map((t) => ({
         id: t.id,
         url: t.url,
@@ -321,7 +342,7 @@ export default function ConfirmBundle() {
             totalAmount > 0 ? `₱${totalAmount.toFixed(2)}` : "",
           items: JSON.stringify(itemsForParam),
           initialIndex: String(currentIndex),
-          source, // 👈 forward where we came from
+          source,
         },
       });
     } catch (e: any) {
@@ -336,7 +357,6 @@ export default function ConfirmBundle() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
-        {/* header */}
         <View style={styles.headerRow}>
           <Pressable
             onPress={handleTopBack}
@@ -351,7 +371,6 @@ export default function ConfirmBundle() {
           <View style={{ width: 22 }} />
         </View>
 
-        {/* MAIN SCROLL: whole page scrolls */}
         <ScrollView
           style={styles.pageScroll}
           contentContainerStyle={styles.pageScrollContent}
@@ -377,7 +396,6 @@ export default function ConfirmBundle() {
 
           {!loading && !!tickets.length && (
             <>
-              {/* PREVIEW BOX (tap to zoom) */}
               <View style={styles.ticketBox}>
                 {previewUrl ? (
                   <>
@@ -445,7 +463,6 @@ export default function ConfirmBundle() {
                 )}
               </View>
 
-              {/* BUNDLE SUMMARY */}
               <View style={styles.infoCard}>
                 <Text style={styles.infoTitle}>
                   Bundle Reservation
@@ -487,7 +504,6 @@ export default function ConfirmBundle() {
                 </Text>
               </View>
 
-              {/* TICKET LIST */}
               <Text style={styles.listTitle}>Tickets in Bundle</Text>
 
               <View style={styles.listContent}>
@@ -534,7 +550,6 @@ export default function ConfirmBundle() {
         </ScrollView>
       </View>
 
-      {/* footer (sticky) */}
       <View style={styles.footer}>
         <Pressable
           onPress={handleConfirmPayment}
@@ -556,7 +571,6 @@ export default function ConfirmBundle() {
         </Pressable>
       </View>
 
-      {/* ZOOM MODAL */}
       <Modal
         visible={zoomVisible}
         transparent
@@ -599,7 +613,6 @@ export default function ConfirmBundle() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#FFFFFF" },
   container: { flex: 1, paddingTop: 12 },
-
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -615,7 +628,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
   },
-
   pageScroll: {
     flex: 1,
   },
@@ -623,7 +635,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 60,
   },
-
   eventName: {
     fontSize: 14,
     fontWeight: "700",
@@ -631,7 +642,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 12,
   },
-
   centerBox: {
     padding: 24,
     alignItems: "center",
@@ -639,8 +649,6 @@ const styles = StyleSheet.create({
   },
   muted: { color: "#6B7280" },
   errorText: { color: "#E53935", fontWeight: "700", textAlign: "center" },
-
-  // preview box
   ticketBox: {
     width: "100%",
     borderRadius: 12,
@@ -700,7 +708,6 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     fontWeight: "600",
   },
-
   infoCard: {
     borderRadius: 16,
     backgroundColor: "#F3F4FF",
@@ -734,7 +741,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#4B5563",
   },
-
   listTitle: {
     marginTop: 8,
     marginBottom: 4,
@@ -783,7 +789,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#071689",
   },
-
   footer: {
     position: "absolute",
     left: 0,
@@ -813,8 +818,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-
-  // modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",
