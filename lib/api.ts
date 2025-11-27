@@ -55,6 +55,7 @@ export type TicketSummary = {
   role?: string | null;
   url?: string | null;
   ticket?: { ticketUrl?: string | null; ticketPath?: string | null } | null;
+  purchaseType?: "online" | "onsite" | null;
 };
 
 export type VoucherSummary = {
@@ -67,6 +68,7 @@ export type VoucherSummary = {
   usedCount?: number | null;
   assignedName?: string | null;
   assignedType?: string | null;
+  assignedEmail?: string | null;
   ticketUrl?: string | null;
   sectionName?: string | null;
   teamSide?: string | null;
@@ -78,8 +80,17 @@ export type ResolveEventItem = {
   eventId: string;
   seasonId: string;
   name: string;
+  seasonName?: string;
   date?: string;
   venue?: { name: string; imageUrl?: string | null } | null;
+};
+
+// New type for the public active season endpoint
+export type ActiveSeasonSummary = {
+  id: string;
+  title: string;
+  status?: string;
+  isActive?: boolean;
 };
 
 type OkItem<T> = { ok: true; item: T };
@@ -205,6 +216,26 @@ async function delJson<T>(path: string): Promise<T> {
 }
 
 export const scannerApi = {
+  // --- NEW: Fetch global active season (public) ---
+  async fetchActiveSeason(): Promise<{ ok: true; season: ActiveSeasonSummary | null }> {
+    try {
+      const res = await getJson<{ season: any }>(`/api/public/active-season`);
+      if (!res.season) return { ok: true, season: null };
+      return {
+        ok: true,
+        season: {
+          id: res.season.id,
+          title: res.season.title || "Active Season",
+          status: res.season.status,
+          isActive: res.season.isActive,
+        },
+      };
+    } catch (e) {
+      // Silent fail to not block UI
+      return { ok: true, season: null };
+    }
+  },
+
   async eventDetails(
     eventId: string,
     seasonId?: string
@@ -247,13 +278,135 @@ export const scannerApi = {
   ): Promise<{ ok: true; items: TicketSummary[] }> {
     const sp = new URLSearchParams({ seasonId });
     if (ids.length > 0) sp.set("ids", ids.join(","));
-    return getJson<{ ok: true; items: TicketSummary[] }>(
+    
+    const raw = await getJson<{ ok: true; items: any[] }>(
       `/api/scanner/event-details/${encodeURIComponent(
         eventId
       )}/tickets?${sp.toString()}`
     );
+
+    // Map raw items to ensure explicit fields like purchaseType are captured
+    const items: TicketSummary[] = (raw.items || []).map((t) => ({
+      ...t,
+      purchaseType: t.purchaseType ?? t.purchase_type ?? null,
+      bundleId: t.bundleId ?? t.bundle_id ?? null,
+      parentTicketId: t.parentTicketId ?? t.parent_ticket_id ?? null,
+      ticketUrl: t.ticketUrl ?? t.ticket_url ?? t.url ?? null,
+      assignedName: t.assignedName ?? t.assigned_name ?? t.holderName ?? null,
+      sectionName: t.sectionName ?? t.section_name ?? null,
+      sideLabel: t.sideLabel ?? t.side_label ?? null,
+    }));
+
+    return { ok: true, items };
   },
 
+  async fetchVouchers(
+    eventId: string,
+    seasonId: string
+  ): Promise<{ ok: true; items: VoucherSummary[] }> {
+    const sp = new URLSearchParams({ seasonId });
+    const raw = await getJson<{
+      ok?: boolean;
+      items?: any[];
+      vouchers?: any[];
+    }>(
+      `/api/scanner/event-details/${encodeURIComponent(
+        eventId
+      )}/vouchers?${sp.toString()}`
+    );
+
+    const list: any[] =
+      (Array.isArray((raw as any).items) && (raw as any).items) ||
+      (Array.isArray((raw as any).vouchers) && (raw as any).vouchers) ||
+      (Array.isArray(raw as any) ? (raw as any) : []);
+
+    const items: VoucherSummary[] = list.map((src) => {
+      const maxUsesSrc =
+        src.maxUses ?? src.max_uses ?? src.maxPax ?? src.max_pax ?? null;
+      const maxUsesNum = maxUsesSrc != null ? Number(maxUsesSrc) : null;
+      const maxUses =
+        maxUsesNum != null && Number.isFinite(maxUsesNum) ? maxUsesNum : null;
+
+      const usedSrc =
+        src.usedCount ?? src.used_count ?? src.uses ?? src.useCount ?? null;
+      const usedNum = usedSrc != null ? Number(usedSrc) : null;
+      const usedCount =
+        usedNum != null && Number.isFinite(usedNum) ? usedNum : null;
+
+      const assignedName =
+        src.assignedName ?? src.assigned_name ?? src.assignedTo?.name ?? null;
+
+      const assignedType =
+        src.assignedType ?? src.assigned_type ?? src.assignedTo?.type ?? null;
+
+      const assignedEmail =
+        src.assignedEmail ??
+        src.assigned_email ??
+        src.assignedTo?.email ??
+        null;
+
+      const ticketUrl =
+        src.ticket?.ticketUrl ??
+        src.ticket?.ticket_url ??
+        src.ticketUrl ??
+        src.ticket_url ??
+        src.imageUrl ??
+        src.image_url ??
+        null;
+
+      const sectionName =
+        src.sectionName ?? src.section_name ?? src.section ?? null;
+
+      const teamSide =
+        src.teamSide ??
+        src.team_side ??
+        src.sideLabel ??
+        src.side_label ??
+        null;
+
+      const validUntil =
+        src.validUntil ??
+        src.valid_until ??
+        src.expiresAt ??
+        src.expires_at ??
+        null;
+
+      const notes = src.notes ?? src.remark ?? src.remarks ?? null;
+
+      const id = String(
+        src.id ??
+          src.voucherId ??
+          src.voucher_id ??
+          src.code ??
+          src.voucherCode ??
+          ""
+      );
+
+      const code = src.code ?? src.voucherCode ?? id;
+
+      const item: VoucherSummary = {
+        id,
+        status: src.status ?? null,
+        name: src.name ?? src.voucherName ?? null,
+        code,
+        issuer: src.issuer ?? src.issuedBy ?? src.issuerName ?? null,
+        maxUses,
+        usedCount,
+        assignedName,
+        assignedType,
+        assignedEmail,
+        ticketUrl,
+        sectionName,
+        teamSide,
+        validUntil,
+        notes,
+      };
+
+      return item;
+    });
+
+    return { ok: true, items };
+  },
 
   async fetchVoucher(
     eventId: string,
@@ -285,6 +438,12 @@ export const scannerApi = {
 
     const assignedType =
       src.assignedType ?? src.assigned_type ?? src.assignedTo?.type ?? null;
+
+    const assignedEmail =
+      src.assignedEmail ??
+      src.assigned_email ??
+      src.assignedTo?.email ??
+      null;
 
     const ticketUrl =
       src.ticket?.ticketUrl ??
@@ -324,6 +483,7 @@ export const scannerApi = {
       usedCount,
       assignedName,
       assignedType,
+      assignedEmail,
       ticketUrl,
       sectionName,
       teamSide,
@@ -346,7 +506,11 @@ export const scannerApi = {
     const sp = new URLSearchParams({ seasonId, voucherId }).toString();
     return patchJson<{
       ok: true;
-      item?: { id: string; usedCount?: number | null; maxUses?: number | null };
+      item?: {
+        id: string;
+        usedCount?: number | null;
+        maxUses?: number | null;
+      };
     }>(
       `/api/scanner/event-details/${encodeURIComponent(
         eventId
@@ -431,10 +595,15 @@ export const scannerApi = {
     );
     if (!server?.ok) throw new Error("Event not found");
     const src = server.item ?? server;
+    
+    // Capture seasonName from backend response
+    const seasonName = src.seasonName ?? src.season_name ?? src.season?.name ?? undefined;
+
     const item: ResolveEventItem = {
       eventId: String(src.eventId ?? src.id ?? q),
       seasonId: String(src.seasonId ?? src.season_id ?? ""),
       name: String(src.name ?? src.title ?? ""),
+      seasonName,
       date: src.date ? String(src.date) : undefined,
       venue: src.venue
         ? {

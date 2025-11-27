@@ -716,113 +716,161 @@ export default function ConfirmTicket() {
   }, [status, isCreateMode]);
 
   const handleUpdateStatus = async (nextStatus: "redeemed" | "invalid") => {
-    if (actionBusy) return;
+      if (actionBusy) return;
 
-    if (!ticket) {
-      setStatus(nextStatus);
-      return;
-    }
-
-    // --- CHILD REDEEM GUARD (unchanged logic) ---
-    if (
-      nextStatus === "redeemed" &&
-      isChildType &&
-      hasBundleGroup &&
-      bundleTickets.length > 0
-    ) {
-      const { redeemedAdults, redeemedChildren } = getBundleStats(bundleTickets);
-
-      if (redeemedAdults <= 0) {
-        Alert.alert(
-          "Cannot redeem child ticket",
-          "At least one adult or priority ticket in this bundle must be redeemed before redeeming child tickets."
-        );
+      if (!ticket) {
+        setStatus(nextStatus);
         return;
       }
 
-      const nextChildren = redeemedChildren + 1;
-      const limit = redeemedAdults * MAX_CHILD_PER_ADULT;
+      // --- CHILD REDEEM GUARD ---
+      if (
+        nextStatus === "redeemed" &&
+        isChildType &&
+        hasBundleGroup &&
+        bundleTickets.length > 0
+      ) {
+        const { redeemedAdults, redeemedChildren } = getBundleStats(bundleTickets);
 
-      if (nextChildren > limit) {
-        Alert.alert(
-          "Child ticket limit reached",
-          `Only ${MAX_CHILD_PER_ADULT} child tickets are allowed per adult/priority ticket in this bundle.`
-        );
-        return;
-      }
-    }
-
-    // --- PARENT INVALIDATION: ONLY NUKE CHILDREN WHEN LAST ADULT GOES INVALID ---
-    if (
-      nextStatus === "invalid" &&
-      isParentType &&
-      hasBundleGroup &&
-      eventIdEffective &&
-      seasonIdEffective
-    ) {
-      try {
-        setActionBusy(true);
-
-        const adults = bundleTickets.filter((t) => {
-          const tType = (t.type as string | undefined)?.toLowerCase();
-          return tType === "adult" || tType === "priority";
-        });
-
-        const children = bundleTickets.filter((t) => {
-          const tType = (t.type as string | undefined)?.toLowerCase();
-          return tType === "child";
-        });
-
-        // simulate this parent becoming invalid
-        const updatedAdults = adults.map((a) =>
-          a.id === ticket.id
-            ? ({ ...a, status: "invalid" } as BundleTicket)
-            : a
-        );
-
-        const allAdultsInvalid = updatedAdults.every((a) => {
-          const s = String((a as any).status || "").toLowerCase();
-          return s === "invalid";
-        });
-
-        const updates: { id: string; status: UpdatableStatus }[] = [
-          { id: ticket.id, status: "invalid" },
-        ];
-
-        // If this was the *last* adult/priority to go invalid,
-        // then invalidate all non-redeemed children.
-        if (allAdultsInvalid) {
-          children.forEach((child) => {
-            const s = String((child as any).status || "").toLowerCase();
-            if (s !== "redeemed") {
-              updates.push({ id: child.id, status: "invalid" });
-            }
-          });
+        if (redeemedAdults <= 0) {
+          Alert.alert(
+            "Cannot redeem child ticket",
+            "At least one adult or priority ticket in this bundle must be redeemed before redeeming child tickets."
+          );
+          return;
         }
 
-        await Promise.all(
-          updates.map((u) =>
-            scannerApi.updateTicketStatus(
-              eventIdEffective,
-              seasonIdEffective,
-              u.id,
-              u.status
-            )
-          )
-        );
+        const nextChildren = redeemedChildren + 1;
+        const limit = redeemedAdults * MAX_CHILD_PER_ADULT;
 
-        setStatus("invalid");
+        if (nextChildren > limit) {
+          Alert.alert(
+            "Child ticket limit reached",
+            `Only ${MAX_CHILD_PER_ADULT} child tickets are allowed per adult/priority ticket in this bundle.`
+          );
+          return;
+        }
+      }
+
+      // --- PARENT INVALIDATION: NUKE ALL CHILDREN IF LAST ADULT GOES INVALID ---
+      if (
+        nextStatus === "invalid" &&
+        isParentType &&
+        hasBundleGroup &&
+        eventIdEffective &&
+        seasonIdEffective
+      ) {
+        try {
+          setActionBusy(true);
+
+          const adults = bundleTickets.filter((t) => {
+            const tType = (t.type as string | undefined)?.toLowerCase();
+            return tType === "adult" || tType === "priority";
+          });
+
+          const children = bundleTickets.filter((t) => {
+            const tType = (t.type as string | undefined)?.toLowerCase();
+            return tType === "child";
+          });
+
+          // simulate this parent becoming invalid
+          const updatedAdults = adults.map((a) =>
+            a.id === ticket.id
+              ? ({ ...a, status: "invalid" } as BundleTicket)
+              : a
+          );
+
+          const allAdultsInvalid = updatedAdults.every((a) => {
+            const s = String((a as any).status || "").toLowerCase();
+            return s === "invalid";
+          });
+
+          const updates: { id: string; status: UpdatableStatus }[] = [
+            { id: ticket.id, status: "invalid" },
+          ];
+
+          // FIX: If all adults are invalid, invalidate ALL children
+          // (Previously this skipped 'redeemed' children)
+          if (allAdultsInvalid) {
+            children.forEach((child) => {
+              // We invalidate the child regardless of current status
+              updates.push({ id: child.id, status: "invalid" });
+            });
+          }
+
+          await Promise.all(
+            updates.map((u) =>
+              scannerApi.updateTicketStatus(
+                eventIdEffective,
+                seasonIdEffective,
+                u.id,
+                u.status
+              )
+            )
+          );
+
+          setStatus("invalid");
+          setTicket((prev) =>
+            prev ? ({ ...prev, status: "invalid" } as TicketSummary) : prev
+          );
+          setBundleTickets((prev) =>
+            prev.map((t) => {
+              const match = updates.find((u) => u.id === t.id);
+              return match
+                ? ({ ...t, status: match.status } as BundleTicket)
+                : t;
+            })
+          );
+        } catch (e: any) {
+          Alert.alert(
+            "Update failed",
+            e?.message || "Could not update ticket status. Please try again."
+          );
+        } finally {
+          setActionBusy(false);
+        }
+        return;
+      }
+
+      // --- NO CTX / STANDARD UPDATE (unchanged) ---
+      if (!ctx) {
+        setStatus(nextStatus);
         setTicket((prev) =>
-          prev ? ({ ...prev, status: "invalid" } as TicketSummary) : prev
+          prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
         );
-        setBundleTickets((prev) =>
-          prev.map((t) => {
-            const match = updates.find((u) => u.id === t.id);
-            return match
-              ? ({ ...t, status: match.status } as BundleTicket)
-              : t;
-          })
+        if (hasBundleGroup) {
+          setBundleTickets((prev) =>
+            prev.map((t) =>
+              t.id === ticket.id
+                ? ({ ...t, status: nextStatus } as BundleTicket)
+                : t
+            )
+          );
+        }
+        return;
+      }
+
+      try {
+        setActionBusy(true);
+        await scannerApi.updateTicketStatus(
+          ctx.eventId,
+          ctx.seasonId,
+          ticket.id,
+          nextStatus
         );
+        setStatus(nextStatus);
+        setTicket((prev) =>
+          prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
+        );
+        if (hasBundleGroup) {
+          setBundleTickets((prev) =>
+            prev.map((t) =>
+              t.id === ticket.id
+                ? ({ ...t, status: nextStatus } as BundleTicket)
+                : t
+            )
+          );
+        }
       } catch (e: any) {
         Alert.alert(
           "Update failed",
@@ -831,58 +879,7 @@ export default function ConfirmTicket() {
       } finally {
         setActionBusy(false);
       }
-      return;
-    }
-
-    // --- NO CTX: just update this ticket + local bundle state, no special child logic ---
-    if (!ctx) {
-      setStatus(nextStatus);
-      setTicket((prev) =>
-        prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
-      );
-      if (hasBundleGroup) {
-        setBundleTickets((prev) =>
-          prev.map((t) =>
-            t.id === ticket.id
-              ? ({ ...t, status: nextStatus } as BundleTicket)
-              : t
-          )
-        );
-      }
-      return;
-    }
-
-    // --- NORMAL SINGLE-TICKET REMOTE UPDATE ---
-    try {
-      setActionBusy(true);
-      await scannerApi.updateTicketStatus(
-        ctx.eventId,
-        ctx.seasonId,
-        ticket.id,
-        nextStatus
-      );
-      setStatus(nextStatus);
-      setTicket((prev) =>
-        prev ? ({ ...prev, status: nextStatus } as TicketSummary) : prev
-      );
-      if (hasBundleGroup) {
-        setBundleTickets((prev) =>
-          prev.map((t) =>
-            t.id === ticket.id
-              ? ({ ...t, status: nextStatus } as BundleTicket)
-              : t
-          )
-        );
-      }
-    } catch (e: any) {
-      Alert.alert(
-        "Update failed",
-        e?.message || "Could not update ticket status. Please try again."
-      );
-    } finally {
-      setActionBusy(false);
-    }
-  };
+    };
 
   const handleUndoToActive = async () => {
     if (actionBusy) return;
@@ -892,7 +889,7 @@ export default function ConfirmTicket() {
       return;
     }
 
-    // PARENT REVERT: only mass-revert children if *previously* all adults were invalid
+    // PARENT REVERT LOGIC
     if (hasBundleGroup && isParentType && eventIdEffective && seasonIdEffective) {
       try {
         setActionBusy(true);
@@ -907,35 +904,43 @@ export default function ConfirmTicket() {
           return tType === "child";
         });
 
+        // 1. Check if we are reviving from INVALID state
         const allAdultsInvalidBefore = adults.every((a) => {
           const s = String((a as any).status || "").toLowerCase();
           return s === "invalid";
         });
 
-        const updatedAdults = adults.map((a) =>
-          a.id === ticket.id
-            ? ({ ...a, status: "active" } as BundleTicket)
-            : a
-        );
-
-        const allAdultsInvalidAfter = updatedAdults.every((a) => {
-          const s = String((a as any).status || "").toLowerCase();
-          return s === "invalid";
-        });
+        // 2. Check if we are reverting from REDEEMED state
+        // If we revert this adult, will any redeemed adults remain?
+        const remainingRedeemedAdults = adults.filter(a => {
+           const s = String((a as any).status || "").toLowerCase();
+           return s === 'redeemed' && a.id !== ticket.id; 
+        }).length;
 
         const updates: { id: string; status: UpdatableStatus }[] = [
           { id: ticket.id, status: "active" },
         ];
 
-        // Only if we are *leaving* the "all adults invalid" state
-        // do we revive invalid children back to active.
-        if (allAdultsInvalidBefore && !allAdultsInvalidAfter) {
+        // SCENARIO A: Reviving from Invalid
+        // If they were all invalid, and we make one active, we can revive the invalid children
+        if (allAdultsInvalidBefore) {
           children.forEach((child) => {
             const s = String((child as any).status || "").toLowerCase();
             if (s === "invalid") {
               updates.push({ id: child.id, status: "active" });
             }
           });
+        }
+
+        // SCENARIO B: Reverting from Redeemed
+        // If there are NO redeemed adults left after this, all redeemed children must revert to active
+        if (status === 'redeemed' && remainingRedeemedAdults === 0) {
+             children.forEach((child) => {
+                const s = String((child as any).status || "").toLowerCase();
+                if (s === "redeemed") {
+                  updates.push({ id: child.id, status: "active" });
+                }
+             });
         }
 
         await Promise.all(
@@ -973,7 +978,7 @@ export default function ConfirmTicket() {
       return;
     }
 
-    // --- NO CTX: just revert this ticket (and its local mirror) ---
+    // --- NO CTX / STANDARD REVERT (unchanged) ---
     if (!ctx) {
       setStatus("active");
       setTicket((prev) =>
@@ -991,7 +996,6 @@ export default function ConfirmTicket() {
       return;
     }
 
-    // --- NORMAL SINGLE-TICKET REMOTE REVERT ---
     try {
       setActionBusy(true);
       await scannerApi.updateTicketStatus(

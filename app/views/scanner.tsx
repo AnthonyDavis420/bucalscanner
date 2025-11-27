@@ -150,79 +150,83 @@ export default function Scanner() {
       const activeSeasonId = (seasonId || "").trim();
 
       if (hasVoucherHint && !hasTicketHint) {
-        const voucherIdFromCode = String(
-          parsed.voucherId ?? parsed.voucher_id ?? ""
-        ).trim();
-        const seasonFromCode = String(
-          parsed.seasonId ?? parsed.season_id ?? seasonId ?? ""
-        ).trim();
-        const eventFromCode = String(
-          parsed.eventId ?? parsed.event_id ?? eventId ?? ""
-        ).trim();
+      const voucherIdFromCode = String(
+        parsed.voucherId ?? parsed.voucher_id ?? ""
+      ).trim();
+      const seasonFromCode = String(
+        parsed.seasonId ?? parsed.season_id ?? seasonId ?? ""
+      ).trim();
+      const eventFromCode = String(
+        parsed.eventId ?? parsed.event_id ?? eventId ?? ""
+      ).trim();
 
-        console.log("VOUCHER HINT:", {
-          voucherIdFromCode,
-          seasonFromCode,
-          eventFromCode,
-        });
+      console.log("VOUCHER HINT:", {
+        voucherIdFromCode,
+        seasonFromCode,
+        eventFromCode,
+      });
 
-        if (!voucherIdFromCode || !seasonFromCode || !eventFromCode) {
-          Alert.alert(
-            "Invalid Voucher",
-            "Voucher QR is missing information. Please try another code."
-          );
-          return;
-        }
-
-        if (
-          activeEventId &&
-          activeSeasonId &&
-          (eventFromCode !== activeEventId ||
-            seasonFromCode !== activeSeasonId)
-        ) {
-          Alert.alert(
-            "Wrong Event",
-            "This voucher belongs to a different event.",
-            [{ text: "OK" }]
-          );
-          return;
-        }
-
-        try {
-          const resp = await scannerApi.fetchVoucher(
-            eventFromCode,
-            seasonFromCode,
-            voucherIdFromCode
-          );
-          const v = resp.item ?? {};
-          const voucherStatusRaw = (v as any).status ?? null;
-          const voucherStatus = normalizeStatus(voucherStatusRaw);
-
-          console.log("VOUCHER FROM API:", {
-            v,
-            voucherStatus,
-            voucherStatusRaw,
-          });
-
-          if (!voucherStatus || voucherStatus !== "active") {
-            showStatusAlert("Voucher", voucherStatus || "");
-            return;
-          }
-        } catch (err: any) {
-          console.log("FETCH VOUCHER ERROR:", err);
-          Alert.alert(
-            "Error",
-            err?.message || "Failed to validate voucher. Please try again."
-          );
-          return;
-        }
-
-        router.push({
-          pathname: "/views/confirmVoucher",
-          params: { code: encodedPayload },
-        });
+      if (!voucherIdFromCode || !seasonFromCode || !eventFromCode) {
+        Alert.alert(
+          "Invalid Voucher",
+          "Voucher QR is missing information. Please try another code."
+        );
         return;
       }
+
+      if (
+        activeEventId &&
+        activeSeasonId &&
+        (eventFromCode !== activeEventId || seasonFromCode !== activeSeasonId)
+      ) {
+        Alert.alert(
+          "Wrong Event",
+          "This voucher belongs to a different event.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+
+      try {
+        const resp = await scannerApi.fetchVoucher(
+          eventFromCode,
+          seasonFromCode,
+          voucherIdFromCode
+        );
+        const v = resp.item ?? {};
+        const voucherStatusRaw = (v as any).status ?? null;
+        const voucherStatus = normalizeStatus(voucherStatusRaw);
+
+        console.log("VOUCHER FROM API:", {
+          v,
+          voucherStatus,
+          voucherStatusRaw,
+        });
+
+        if (!voucherStatus || voucherStatus !== "active") {
+          showStatusAlert("Voucher", voucherStatus || "");
+          return;
+        }
+      } catch (err: any) {
+        console.log("FETCH VOUCHER ERROR:", err);
+        Alert.alert(
+          "Error",
+          err?.message || "Failed to validate voucher. Please try again."
+        );
+        return;
+      }
+
+      router.push({
+        pathname: "/views/confirmVoucher",
+        params: {
+          code: encodedPayload,
+          eventId: eventFromCode,
+          seasonId: seasonFromCode,
+          voucherId: voucherIdFromCode,
+        },
+      });
+      return;
+    }
 
       const seasonFromCode = String(
         parsed.seasonId ?? parsed.season_id ?? seasonId ?? ""

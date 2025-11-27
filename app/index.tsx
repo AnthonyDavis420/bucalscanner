@@ -1,4 +1,3 @@
-// app/index.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,38 +22,67 @@ const STORAGE_KEYS = {
   eventId: "bucalscanner.activeEventId",
   seasonId: "bucalscanner.activeSeasonId",
   eventName: "bucalscanner.activeEventName",
+  seasonName: "bucalscanner.activeSeasonName",
 };
 
 const BLUE = "#071689";
 
 export default function Index() {
   const [eventId, setEventId] = useState("");
+  const [savedSeasonName, setSavedSeasonName] = useState("");
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(true);
 
   const isValid = useMemo(() => eventId.trim().length > 0, [eventId]);
 
-  // Prefill from saved storage (supports legacy JSON string in same key)
+  // Initialize State & Fetch Active Season Context
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(STORAGE_KEYS.eventId);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (parsed?.eventCode || parsed?.eventId) {
-              setEventId((parsed.eventCode || parsed.eventId || "").trim());
-            } else {
-              setEventId(saved.trim());
+        // 1. Load local data first
+        const [savedId, savedName] = await AsyncStorage.multiGet([
+          STORAGE_KEYS.eventId,
+          STORAGE_KEYS.seasonName,
+        ]);
+
+        if (!cancelled) {
+          if (savedName?.[1]) setSavedSeasonName(savedName[1].trim());
+
+          if (savedId?.[1]) {
+            const val = savedId[1];
+            try {
+              const parsed = JSON.parse(val);
+              if (parsed?.eventCode || parsed?.eventId) {
+                setEventId((parsed.eventCode || parsed.eventId || "").trim());
+              } else {
+                setEventId(val.trim());
+              }
+            } catch {
+              setEventId(val.trim());
             }
-          } catch {
-            setEventId(saved.trim());
           }
         }
+
+        // 2. Fetch Global Active Season from API (Fallback/Update)
+        try {
+          const res = await scannerApi.fetchActiveSeason();
+          if (!cancelled && res.season?.title) {
+            setSavedSeasonName(res.season.title);
+            // Optional: update storage so it's there next time immediately
+            await AsyncStorage.setItem(STORAGE_KEYS.seasonName, res.season.title);
+          }
+        } catch (err) {
+          // Ignore API errors, keep using local or empty
+        }
+
       } finally {
-        setRestoring(false);
+        if (!cancelled) setRestoring(false);
       }
     })();
+
+    return () => { cancelled = true; };
   }, []);
 
   const handleContinue = useCallback(async () => {
@@ -66,12 +94,16 @@ export default function Index() {
       const trimmed = eventId.trim();
 
       const res = await scannerApi.resolveEvent(trimmed);
-      const { seasonId, eventId: resolvedEventId, name } = res.item;
+      const { seasonId, eventId: resolvedEventId, name, seasonName } = res.item;
+      
+      // Prefer the season name from the specific event resolution, otherwise fall back to global active
+      const finalSeasonName = seasonName || savedSeasonName || "";
 
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.eventId, resolvedEventId],
         [STORAGE_KEYS.seasonId, seasonId],
         [STORAGE_KEYS.eventName, name ?? ""],
+        [STORAGE_KEYS.seasonName, finalSeasonName],
       ]);
 
       router.push("/views/welcome");
@@ -80,7 +112,7 @@ export default function Index() {
     } finally {
       setLoading(false);
     }
-  }, [eventId, isValid, loading]);
+  }, [eventId, isValid, loading, savedSeasonName]);
 
   if (restoring) {
     return (
@@ -109,6 +141,10 @@ export default function Index() {
               resizeMode="contain"
             />
 
+            {savedSeasonName ? (
+              <Text style={styles.seasonName}>{savedSeasonName}</Text>
+            ) : null}
+
             <View style={styles.formBlock}>
               <Text style={styles.label}>Please enter the Event ID:</Text>
 
@@ -122,7 +158,7 @@ export default function Index() {
                 style={styles.input}
                 returnKeyType="done"
                 onSubmitEditing={handleContinue}
-                autoFocus
+                autoFocus={!eventId} 
               />
 
               <Pressable
@@ -165,6 +201,14 @@ const styles = StyleSheet.create({
   },
   headerBlock: {
     alignItems: "center",
+  },
+  seasonName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#64748B",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 8,
   },
   welcome: {
     fontSize: 22,

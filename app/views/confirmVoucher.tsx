@@ -3,14 +3,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
   Image,
-  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi } from "../../lib/api";
@@ -25,193 +26,148 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-type Params = {
-  code?: string;
-  voucherName?: string;
-  voucherCode?: string;
-  issuer?: string;
-  maxPax?: string;
-};
-
 function asString(v: string | string[] | undefined, fallback = ""): string {
   if (Array.isArray(v)) return (v[0] ?? fallback) as string;
   return (v ?? fallback) as string;
 }
 
-function isMethodNotAllowedError(err: any): boolean {
-  const msg = String(err?.message || "");
-  return msg.includes("HTTP 405");
-}
+function formatExpiry(raw: string | null | undefined): string {
+  if (!raw) return "No expiry";
 
-export default function ConfirmVoucher() {
-  const params = useLocalSearchParams<Params>();
+  const trimmed = String(raw).trim();
+  if (!trimmed) return "No expiry";
 
-  const rawCodeParam = asString(params.code);
-  const decodedCode = rawCodeParam ? decodeURIComponent(rawCodeParam) : "";
+  const parseYmd = (s: string): Date | null => {
+    const m = s.match(
+      /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?/
+    );
+    if (!m) return null;
 
-  let parsed: any = null;
-  if (decodedCode) {
-    try {
-      parsed = JSON.parse(decodedCode);
-    } catch {}
+    const year = Number(m[1]);
+    const month = Number(m[2]) - 1;
+    const day = Number(m[3]);
+    const hour = m[4] != null ? Number(m[4]) : 23;
+    const minute = m[5] != null ? Number(m[5]) : 59;
+
+    if (
+      !Number.isFinite(year) ||
+      !Number.isFinite(month) ||
+      !Number.isFinite(day) ||
+      !Number.isFinite(hour) ||
+      !Number.isFinite(minute)
+    ) {
+      return null;
+    }
+
+    return new Date(year, month, day, hour, minute, 0, 0);
+  };
+
+  let d: Date | null = null;
+
+  if (/^\d+$/.test(trimmed)) {
+    const num = Number(trimmed);
+    if (trimmed.length <= 10) {
+      d = new Date(num * 1000);
+    } else {
+      d = new Date(num);
+    }
   }
 
-  const voucherIdFromPayload = asString(
-    parsed?.voucherId ?? parsed?.voucher_id,
-    ""
-  );
-  const eventIdFromPayload = asString(parsed?.eventId ?? parsed?.event_id, "");
-  const seasonIdFromPayload = asString(
-    parsed?.seasonId ?? parsed?.season_id,
-    ""
-  );
+  if (!d) d = parseYmd(trimmed);
+  if (!d) {
+    const tmp = new Date(trimmed);
+    if (!Number.isNaN(tmp.getTime())) d = tmp;
+  }
 
-  const payloadName =
-    typeof parsed?.voucherName === "string" && parsed.voucherName.trim()
-      ? parsed.voucherName.trim()
-      : undefined;
-  const payloadIssuer =
-    typeof parsed?.issuer === "string" && parsed.issuer.trim()
-      ? parsed.issuer.trim()
-      : undefined;
-  const payloadCode =
-    typeof parsed?.code === "string" && parsed.code.trim()
-      ? parsed.code.trim()
-      : undefined;
+  if (!d || Number.isNaN(d.getTime())) return trimmed;
 
-  const payloadMaxUsesRaw =
-    parsed?.maxUses ?? parsed?.max_uses ?? parsed?.maxPax ?? parsed?.max_pax;
-  const payloadMaxUses =
-    typeof payloadMaxUsesRaw === "number" && payloadMaxUsesRaw > 0
-      ? payloadMaxUsesRaw
-      : undefined;
-
-  const payloadUsedCountRaw =
-    parsed?.usedCount ?? parsed?.used_count ?? parsed?.used ?? parsed?.uses;
-  const payloadUsedCount =
-    typeof payloadUsedCountRaw === "number" && payloadUsedCountRaw >= 0
-      ? payloadUsedCountRaw
-      : undefined;
-
-  const payloadTicketUrlRaw =
-    parsed?.ticket?.ticketUrl ??
-    parsed?.ticket?.ticket_url ??
-    parsed?.ticketUrl ??
-    parsed?.ticket_url ??
-    parsed?.imageUrl ??
-    parsed?.image_url;
-  const payloadTicketUrl =
-    typeof payloadTicketUrlRaw === "string" && payloadTicketUrlRaw.trim()
-      ? payloadTicketUrlRaw.trim()
-      : undefined;
-
-  const payloadType =
-    typeof parsed?.type === "string" && parsed.type.trim()
-      ? parsed.type.trim()
-      : undefined;
-
-  const payloadSectionNameRaw =
-    parsed?.sectionName ?? parsed?.section_name ?? parsed?.section;
-  const payloadSectionName =
-    typeof payloadSectionNameRaw === "string" &&
-    payloadSectionNameRaw.trim()
-      ? payloadSectionNameRaw.trim()
-      : undefined;
-
-  const payloadTeamSideRaw =
-    parsed?.teamSide ??
-    parsed?.team_side ??
-    parsed?.sideLabel ??
-    parsed?.side_label;
-  const payloadTeamSide =
-    typeof payloadTeamSideRaw === "string" && payloadTeamSideRaw.trim()
-      ? payloadTeamSideRaw.trim()
-      : undefined;
-
-  const payloadValidUntilRaw =
-    parsed?.validUntil ?? parsed?.valid_until ?? undefined;
-  const payloadValidUntil =
-    typeof payloadValidUntilRaw === "string" &&
-    payloadValidUntilRaw.trim()
-      ? payloadValidUntilRaw.trim()
-      : undefined;
-
-  const payloadNotesRaw =
-    parsed?.notes ?? parsed?.remark ?? parsed?.remarks ?? undefined;
-  const payloadNotes =
-    typeof payloadNotesRaw === "string" && payloadNotesRaw.trim()
-      ? payloadNotesRaw.trim()
-      : undefined;
-
-  const [voucherName, setVoucherName] = useState<string>(() => {
-    const fromParam = asString(params.voucherName);
-    return payloadName || fromParam || "VIP Group Access";
+  const datePart = d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   });
 
-  const [voucherCode, setVoucherCode] = useState<string>(() => {
-    const fromParam = asString(params.voucherCode);
-    return payloadCode || fromParam || "VOU-992-AA";
-  });
+  let hours = d.getHours();
+  const minutes = d.getMinutes();
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  const minStr = minutes.toString().padStart(2, "0");
 
-  const [issuer, setIssuer] = useState<string>(() => {
-    const fromParam = asString(params.issuer);
-    return payloadIssuer || fromParam || "ADNU Athletics";
-  });
+  return `${datePart} · ${hours}:${minStr}${ampm}`;
+}
 
-  const [eventId, setEventId] = useState<string>(() => eventIdFromPayload);
-  const [seasonId, setSeasonId] = useState<string>(() => seasonIdFromPayload);
-  const [voucherId, setVoucherId] = useState<string>(() => voucherIdFromPayload);
+type RouteParams = {
+  eventId?: string | string[];
+  seasonId?: string | string[];
+  voucherId?: string | string[];
+  code?: string | string[];
+  status?: string | string[];
+  source?: string | string[];
+};
 
-  const [maxUses, setMaxUses] = useState<number>(() => {
-    const fromParamStr = asString(params.maxPax);
-    const fromParam = parseInt(fromParamStr || "", 10);
-    if (!Number.isNaN(fromParam) && fromParam > 0) return fromParam;
-    if (payloadMaxUses) return payloadMaxUses;
-    return 10;
-  });
+type VoucherView = {
+  id: string;
+  code: string;
+  voucherName: string;
+  assignedName: string | null;
+  assignedType: string | null;
+  assignedEmail: string | null;
+  maxUses: number;
+  usedCount: number;
+  ticketUrl: string | null;
+  notes: string | null;
+  sectionName: string | null;
+  teamSide: string | null;
+  status: string;
+  validUntil: string | null;
+};
 
-  const [usedCount, setUsedCount] = useState<number>(() => {
-    if (typeof payloadUsedCount === "number") return payloadUsedCount;
-    return 0;
-  });
+export default function ConfirmVoucher() {
+  const params = useLocalSearchParams<RouteParams>();
 
-  const [ticketUrl, setTicketUrl] = useState<string | null>(
-    () => payloadTicketUrl || null
-  );
-  const [orgType, setOrgType] = useState<string | null>(
-    () => payloadType || null
-  );
-  const [sectionName, setSectionName] = useState<string | null>(
-    () => payloadSectionName || null
-  );
-  const [teamSide, setTeamSide] = useState<string | null>(
-    () => payloadTeamSide || null
-  );
-  const [validUntil, setValidUntil] = useState<string | null>(
-    () => payloadValidUntil || null
-  );
-  const [notes, setNotes] = useState<string | null>(
-    () => payloadNotes || null
-  );
+  const eventIdParam = asString(params.eventId);
+  const seasonIdParam = asString(params.seasonId);
+  const voucherIdParam = asString(params.voucherId);
+  const statusParam = asString(params.status);
+  const sourceParam = asString(params.source);
+  const cameFromVouchers = sourceParam === "allVouchers";
 
-  const [isRedeemed, setIsRedeemed] = useState(false);
+  const rawCodeParam = asString(params.code);
+  let payloadEventId: string | undefined;
+  let payloadSeasonId: string | undefined;
+  let payloadVoucherId: string | undefined;
+
+  try {
+    if (rawCodeParam) {
+      const decoded = decodeURIComponent(rawCodeParam);
+      if (decoded.trim().startsWith("{")) {
+        const parsed = JSON.parse(decoded);
+        payloadEventId = asString(parsed.eventId ?? parsed.event_id, undefined);
+        payloadSeasonId = asString(
+          parsed.seasonId ?? parsed.season_id,
+          undefined
+        );
+        payloadVoucherId = asString(
+          parsed.voucherId ?? parsed.voucher_id ?? parsed.id,
+          undefined
+        );
+      }
+    }
+  } catch {}
+
+  const eventId = eventIdParam || payloadEventId || "";
+  const seasonId = seasonIdParam || payloadSeasonId || "";
+  const voucherId = voucherIdParam || payloadVoucherId || "";
+
+  const [voucher, setVoucher] = useState<VoucherView | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [eventExpiry, setEventExpiry] = useState<string | null>(null);
+
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [isRedeemed, setIsRedeemed] = useState(false);
   const [zoomVisible, setZoomVisible] = useState(false);
-
-  const remaining = useMemo(
-    () => Math.max(0, maxUses - usedCount),
-    [maxUses, usedCount]
-  );
-
-  const maxSelectable = remaining > 0 ? remaining : 0;
-
-  const [count, setCount] = useState<number>(() =>
-    maxSelectable > 0 ? 1 : 0
-  );
-
-  // ✅ True when the voucher is fully consumed
-  const fullyRedeemed =
-    maxUses > 0 && remaining === 0;
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -248,7 +204,6 @@ export default function ConfirmVoucher() {
     });
 
   const composedGesture = Gesture.Simultaneous(pinch, pan);
-
   const animatedImageStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: translateX.value },
@@ -258,281 +213,161 @@ export default function ConfirmVoucher() {
   }));
 
   useEffect(() => {
-    if (isRedeemed) return;
+    if (!eventId || !seasonId || !voucherId) {
+      setLoading(false);
+      setLoadError("Missing voucher context.");
+      return;
+    }
 
-    setCount((prev) => {
-      if (maxSelectable <= 0) return 0;
-      if (prev < 1) return 1;
-      if (prev > maxSelectable) return maxSelectable;
-      return prev;
-    });
-  }, [maxSelectable, isRedeemed]);
-
-  useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      if (!eventId && eventIdFromPayload) setEventId(eventIdFromPayload);
-      if (!seasonId && seasonIdFromPayload) setSeasonId(seasonIdFromPayload);
-      if (!voucherId && voucherIdFromPayload) setVoucherId(voucherIdFromPayload);
-
-      if (!eventIdFromPayload || !seasonIdFromPayload || !voucherIdFromPayload) {
-        return;
-      }
-
       try {
-        const resp = await scannerApi.fetchVoucher(
-          eventIdFromPayload,
-          seasonIdFromPayload,
-          voucherIdFromPayload
-        );
+        setLoading(true);
+        setLoadError(null);
+
+        const [voucherResp, eventResp] = await Promise.all([
+          scannerApi.fetchVoucher(eventId, seasonId, voucherId),
+          scannerApi.eventDetails(eventId, seasonId).catch(() => null),
+        ]);
+
         if (cancelled) return;
 
-        const v = (resp.item ?? {}) as any;
+        const raw = (voucherResp.item ?? {}) as any;
 
-        const vAssignedName =
-          (v.assignedName && String(v.assignedName).trim()) ||
-          (v.assigned_name && String(v.assigned_name).trim()) ||
-          (v.assignedTo?.name && String(v.assignedTo.name).trim()) ||
-          "";
+        const maxUses =
+          typeof raw.maxUses === "number" && Number.isFinite(raw.maxUses)
+            ? raw.maxUses
+            : 1;
+        const usedCount =
+          typeof raw.usedCount === "number" && Number.isFinite(raw.usedCount)
+            ? raw.usedCount
+            : 0;
 
-        const vName =
-          (v.name && String(v.name).trim()) ||
-          vAssignedName ||
-          payloadName ||
-          asString(params.voucherName);
+        const view: VoucherView = {
+          id: raw.id || voucherId,
+          code: raw.code || raw.voucherCode || voucherId,
+          voucherName: raw.name || raw.voucherName || "Group Voucher",
+          assignedName: raw.assignedName ?? null,
+          assignedType: raw.assignedType ?? null,
+          assignedEmail: raw.assignedEmail ?? null,
+          maxUses,
+          usedCount,
+          ticketUrl:
+            raw.ticketUrl || raw.ticket?.ticketUrl || raw.imageUrl || null,
+          notes: raw.notes ?? null,
+          sectionName: raw.sectionName ?? null,
+          teamSide: raw.teamSide ?? null,
+          status: raw.status || statusParam || "active",
+          validUntil: raw.validUntil ?? null,
+        };
 
-        const vCode =
-          (v.code && String(v.code).trim()) ||
-          payloadCode ||
-          asString(params.voucherCode);
-        const vIssuer =
-          (v.issuer && String(v.issuer).trim()) ||
-          payloadIssuer ||
-          asString(params.issuer);
+        let fallbackExpiry: string | null = null;
+        if (eventResp && (eventResp as any).item) {
+          const e: any = (eventResp as any).item;
+          const dateStr = e.date ? String(e.date) : "";
+          let timeStr = "";
+          if (e.timeEnd) timeStr = String(e.timeEnd);
+          else if (e.time_end) timeStr = String(e.time_end);
+          else if (e.timeRange) timeStr = String(e.timeRange);
+          else if (e.time_range) timeStr = String(e.time_range);
+          else if (e.time) timeStr = String(e.time);
+          if (dateStr && timeStr) fallbackExpiry = `${dateStr} ${timeStr}`;
+          else if (timeStr) fallbackExpiry = timeStr;
+          else if (dateStr) fallbackExpiry = dateStr;
+        }
 
-        const vMaxRaw =
-          v.maxUses ?? v.max_uses ?? v.maxPax ?? v.max_pax ?? payloadMaxUses;
-        const vMax =
-          typeof vMaxRaw === "number" && vMaxRaw > 0 ? vMaxRaw : maxUses;
-
-        const vUsedRaw =
-          v.usedCount ??
-          v.used_count ??
-          v.used ??
-          v.uses ??
-          payloadUsedCount ??
-          usedCount;
-        const vUsed =
-          typeof vUsedRaw === "number" && vUsedRaw >= 0 ? vUsedRaw : usedCount;
-
-        const vTicketUrlRaw =
-          v?.ticket?.ticketUrl ??
-          v?.ticket?.ticket_url ??
-          v?.ticketUrl ??
-          v?.ticket_url ??
-          v?.imageUrl ??
-          v?.image_url ??
-          payloadTicketUrl;
-        const vTicketUrl =
-          typeof vTicketUrlRaw === "string" && vTicketUrlRaw.trim()
-            ? vTicketUrlRaw.trim()
-            : null;
-
-        const vTypeRaw =
-          v?.assignedType ??
-          v?.assigned_type ??
-          v?.assignedTo?.type ??
-          payloadType;
-        const vType =
-          typeof vTypeRaw === "string" && vTypeRaw.trim()
-            ? vTypeRaw.trim()
-            : null;
-
-        const vSectionRaw =
-          v?.sectionName ??
-          v?.section_name ??
-          v?.section ??
-          payloadSectionName;
-        const vSection =
-          typeof vSectionRaw === "string" && vSectionRaw.trim()
-            ? vSectionRaw.trim()
-            : null;
-
-        const vSideRaw =
-          v?.teamSide ??
-          v?.team_side ??
-          v?.sideLabel ??
-          v?.side_label ??
-          payloadTeamSide;
-        const vSide =
-          typeof vSideRaw === "string" && vSideRaw.trim()
-            ? vSideRaw.trim()
-            : null;
-
-        const vValidRaw =
-          v?.validUntil ?? v?.valid_until ?? payloadValidUntil;
-        const vValid =
-          typeof vValidRaw === "string" && vValidRaw.trim()
-            ? vValidRaw.trim()
-            : null;
-
-        const vNotesRaw =
-          v?.notes ?? v?.remark ?? v?.remarks ?? payloadNotes;
-        const vNotes =
-          typeof vNotesRaw === "string" && vNotesRaw.trim()
-            ? vNotesRaw.trim()
-            : null;
-
-        setVoucherName(vName || vAssignedName || "VIP Group Access");
-        setVoucherCode(vCode || voucherCode);
-        setIssuer(vIssuer || "ADNU Athletics");
-        setMaxUses(vMax);
-        setUsedCount(vUsed);
-
-        if (vTicketUrl) setTicketUrl(vTicketUrl);
-        if (vType) setOrgType(vType);
-        if (vSection) setSectionName(vSection);
-        if (vSide) setTeamSide(vSide);
-        if (vValid) setValidUntil(vValid);
-        if (vNotes) setNotes(vNotes);
-      } catch (err) {
-        console.log("FETCH VOUCHER DETAILS ERROR:", err);
+        setVoucher(view);
+        setEventExpiry(fallbackExpiry);
+      } catch (err: any) {
+        console.log("FETCH VOUCHER ERROR", err);
+        setLoadError(err?.message || "Failed to load voucher.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [
-    eventIdFromPayload,
-    seasonIdFromPayload,
-    voucherIdFromPayload,
-    payloadName,
-    payloadCode,
-    payloadIssuer,
-    payloadMaxUses,
-    payloadUsedCount,
-    payloadTicketUrl,
-    payloadType,
-    payloadSectionName,
-    payloadTeamSide,
-    payloadValidUntil,
-    payloadNotes,
-  ]);
+  }, [eventId, seasonId, voucherId, statusParam]);
 
-  const decrement = () => {
-    if (count > 1) setCount((c) => c - 1);
-  };
+  const remaining = useMemo(() => {
+    if (!voucher) return 0;
+    if (!voucher.maxUses || voucher.maxUses <= 0) return Infinity;
+    return Math.max(0, voucher.maxUses - voucher.usedCount);
+  }, [voucher]);
 
-  const increment = () => {
-    if (maxSelectable <= 0) return;
-    setCount((c) => {
-      if (c >= maxSelectable) return c;
-      return c + 1;
-    });
-  };
+  const remainingLabel = useMemo(() => {
+    if (!voucher) return "";
+    if (!Number.isFinite(remaining)) return "Unlimited uses";
+    return `${remaining} remaining from ${voucher.maxUses} pax`;
+  }, [voucher, remaining]);
 
-  const handleConfirm = async () => {
-    if (submitBusy) return;
-    if (isRedeemed) return;
-    if (count <= 0) {
-      Alert.alert("No Pax Selected", "Please select at least 1 person to admit.", [
-        { text: "OK" },
-      ]);
+  const [count, setCount] = useState(1);
+
+  useEffect(() => {
+    if (!voucher) return;
+    if (!Number.isFinite(remaining)) {
+      setCount(1);
       return;
     }
+    if (remaining <= 0) setCount(0);
+    else if (count < 1) setCount(1);
+    else if (count > remaining) setCount(remaining);
+  }, [voucher, remaining]);
 
-    const eId = eventId || eventIdFromPayload;
-    const sId = seasonId || seasonIdFromPayload;
-    const vId = voucherId || voucherIdFromPayload;
-
-    try {
-      setSubmitBusy(true);
-
-      if (eId && sId && vId) {
-        try {
-          const resp = await scannerApi.useVoucher(eId, sId, vId, count);
-          const updated = (resp.item ?? {}) as any;
-
-          const newUsedRaw =
-            updated.usedCount ??
-            updated.used_count ??
-            updated.used ??
-            updated.uses;
-          const newMaxRaw =
-            updated.maxUses ??
-            updated.max_uses ??
-            updated.maxPax ??
-            updated.max_pax;
-
-          if (typeof newUsedRaw === "number") {
-            setUsedCount(newUsedRaw);
-          } else {
-            setUsedCount((prev) => prev + count);
-          }
-
-          if (typeof newMaxRaw === "number" && newMaxRaw > 0) {
-            setMaxUses(newMaxRaw);
-          }
-
-          const uValidRaw =
-            updated.validUntil ?? updated.valid_until ?? validUntil;
-          if (typeof uValidRaw === "string" && uValidRaw.trim()) {
-            setValidUntil(uValidRaw.trim());
-          }
-
-          const uNotesRaw =
-            updated.notes ??
-            updated.remark ??
-            updated.remarks ??
-            notes;
-          if (typeof uNotesRaw === "string" && uNotesRaw.trim()) {
-            setNotes(uNotesRaw.trim());
-          }
-        } catch (err: any) {
-          console.log("USE VOUCHER ERROR:", err);
-          if (isMethodNotAllowedError(err)) {
-            setUsedCount((prev) => prev + count);
-          } else {
-            Alert.alert(
-              "Error",
-              err?.message || "Failed to record voucher usage. Please try again."
-            );
-            setSubmitBusy(false);
-            return;
-          }
-        }
-      } else {
-        setUsedCount((prev) => prev + count);
-      }
-
-      setIsRedeemed(true);
-    } finally {
-      setSubmitBusy(false);
+  const statusDisplay = useMemo(() => {
+    if (!voucher) return (statusParam || "active").toLowerCase();
+    if (voucher.maxUses > 0 && voucher.usedCount >= voucher.maxUses) {
+      return "redeemed";
     }
-  };
+    return (voucher.status || "active").toLowerCase();
+  }, [voucher, statusParam]);
+
+  const statusColor =
+    statusDisplay === "active"
+      ? "#16A34A"
+      : statusDisplay === "redeemed"
+      ? "#071689"
+      : "#DC2626";
 
   const handleBack = () => {
     router.back();
   };
 
-  // 🔁 Scan Next: just pop back to the existing scanner (no new screen)
+  const handleConfirm = async () => {
+    if (!voucher) return;
+    if (Number.isFinite(remaining) && remaining <= 0) return;
+    if (count <= 0 || submitBusy) return;
+
+    try {
+      setSubmitBusy(true);
+      await scannerApi.useVoucher(eventId, seasonId, voucher.id, count);
+      setVoucher((prev) =>
+        prev
+          ? {
+              ...prev,
+              usedCount: prev.usedCount + count,
+            }
+          : prev
+      );
+      setIsRedeemed(true);
+    } catch (err: any) {
+      Alert.alert("Error", "Failed to redeem voucher.");
+    } finally {
+      setSubmitBusy(false);
+    }
+  };
+
   const handleScanNext = () => {
     router.back();
   };
 
-  const remainingText =
-    maxUses > 0
-      ? `${remaining} remaining from ${maxUses} pax`
-      : "Unlimited pax";
-
-  const displayName = voucherName || issuer || "";
-  const displayType =
-    orgType || (payloadMaxUses ? "Group Voucher" : "Voucher");
-  const displayTicketId = voucherId || voucherCode || "";
-  const displaySectionSide = [sectionName, teamSide]
-    .filter(Boolean)
+  const rawExpiry = voucher?.validUntil ?? eventExpiry;
+  const expiryLabel = formatExpiry(rawExpiry ?? null);
+  const sectionSide = [voucher?.sectionName, voucher?.teamSide]
+    .filter((x) => x && x.trim())
     .join(" – ");
 
   return (
@@ -540,192 +375,191 @@ export default function ConfirmVoucher() {
       <View style={styles.topBar}>
         <Pressable
           onPress={handleBack}
-          hitSlop={12}
-          style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
-        >
-          <Ionicons name="arrow-back" size={22} color="#000" />
-        </Pressable>
-        <Text
-          style={[
-            styles.title,
-            { color: isRedeemed ? "#071689" : "#2E7D32" },
+          style={({ pressed }) => [
+            styles.iconBtn,
+            pressed && { backgroundColor: "#F3F4F6" },
           ]}
+          hitSlop={12}
         >
-          {isRedeemed ? "Redemption Complete" : "Voucher Valid!"}
-        </Text>
+          <Ionicons name="arrow-back" size={22} color="#071689" />
+        </Pressable>
+        <Text style={styles.topTitle}>Confirm Voucher</Text>
         <View style={{ width: 22 }} />
       </View>
 
       <ScrollView
-        style={styles.scrollView}
+        style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.ticketBox}>
-          {ticketUrl ? (
-            <>
-              <Pressable
-                onPress={() => {
-                  scale.value = 1;
-                  translateX.value = 0;
-                  translateY.value = 0;
-                  setZoomVisible(true);
-                }}
-                style={styles.ticketPressable}
-              >
-                <View style={styles.ticketInnerShadow}>
-                  <Image
-                    source={{ uri: ticketUrl }}
-                    style={styles.ticketImage}
-                    resizeMode="contain"
-                  />
-                </View>
-              </Pressable>
-              <Text style={styles.tapHint}>Tap ticket to zoom</Text>
-            </>
-          ) : (
-            <View style={styles.ticketPlaceholder}>
-              <Text style={styles.placeholderText}>
-                Ticket image not available
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.card}>
-          {displayName ? (
-            <Text style={styles.voucherName}>{displayName}</Text>
-          ) : null}
-
-          <View style={styles.metaBlock}>
-            {displayType ? (
-              <Text style={styles.metaLine}>
-                <Text style={styles.metaLabel}>Type: </Text>
-                <Text style={styles.metaValue}>{displayType}</Text>
-              </Text>
-            ) : null}
-
-            {displayTicketId ? (
-              <Text style={styles.metaLine}>
-                <Text style={styles.metaLabel}>Ticket ID: </Text>
-                <Text style={[styles.metaValue, styles.mono]}>
-                  {displayTicketId}
-                </Text>
-              </Text>
-            ) : null}
-
-            {displaySectionSide ? (
-              <Text style={styles.metaLine}>
-                <Text style={styles.metaLabel}>Section / Side: </Text>
-                <Text style={styles.metaValue}>{displaySectionSide}</Text>
-              </Text>
-            ) : null}
-
-            {validUntil ? (
-              <Text style={styles.metaLine}>
-                <Text style={styles.metaLabel}>Valid Until: </Text>
-                <Text style={styles.metaValue}>{validUntil}</Text>
-              </Text>
-            ) : null}
-
-            {issuer ? (
-              <Text style={styles.metaLine}>
-                <Text style={styles.metaLabel}>Issued By: </Text>
-                <Text style={styles.metaValue}>{issuer}</Text>
-              </Text>
-            ) : null}
+        {loading && (
+          <View style={styles.centerBox}>
+            <ActivityIndicator size="small" />
+            <Text style={styles.centerText}>Loading voucher…</Text>
           </View>
-        </View>
+        )}
 
-        {notes ? (
-          <View style={styles.notesBox}>
-            <Text style={styles.notesLabel}>Notes</Text>
-            <Text style={styles.notesText}>{notes}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.divider} />
-
-        {!isRedeemed ? (
-          <View style={styles.counterContainer}>
-            <Text style={styles.label}>Select Pax Entry</Text>
-
-            <View style={styles.counterRow}>
-              <Pressable
-                onPress={decrement}
-                style={({ pressed }) => [
-                  styles.counterBtn,
-                  count <= 1 && styles.disabledBtn,
-                  pressed && { opacity: 0.8 },
-                ]}
-                disabled={count <= 1}
-              >
-                <Ionicons name="remove" size={28} color="#fff" />
-              </Pressable>
-
-              <View style={styles.countDisplay}>
-                <Text style={styles.countText}>{count}</Text>
-                <Text style={styles.countLabel}>People</Text>
-              </View>
-
-              <Pressable
-                onPress={increment}
-                style={({ pressed }) => [
-                  styles.counterBtn,
-                  (count >= maxSelectable || maxSelectable === 0) &&
-                    styles.disabledBtn,
-                  pressed && { opacity: 0.8 },
-                ]}
-                disabled={count >= maxSelectable || maxSelectable === 0}
-              >
-                <Ionicons name="add" size={28} color="#fff" />
-              </Pressable>
-            </View>
-
-            <Text style={styles.limitText}>{remainingText}</Text>
-          </View>
-        ) : (
-          <View style={styles.successBox}>
-            <Ionicons name="checkmark-circle" size={48} color="#2E7D32" />
-            {/* When fully redeemed, show special message instead of "0 pax" */}
-            <Text style={styles.successTitle}>
-              {fullyRedeemed
-                ? "This voucher has been fully redeemed."
-                : `${count} Pax Admitted`}
-            </Text>
-            <Text style={styles.successSub}>
-              {fullyRedeemed
-                ? "No more entries can be admitted with this voucher."
-                : "Recorded successfully"}
+        {loadError && !loading && (
+          <View style={styles.centerBox}>
+            <Text style={[styles.centerText, { color: "#DC2626" }]}>
+              {loadError}
             </Text>
           </View>
         )}
 
-        <View style={{ height: 120 }} />
+        {voucher && !loading && !loadError && (
+          <>
+            <View style={styles.ticketBox}>
+              {voucher.ticketUrl ? (
+                <>
+                  <Pressable
+                    onPress={() => {
+                      scale.value = 1;
+                      translateX.value = 0;
+                      translateY.value = 0;
+                      setZoomVisible(true);
+                    }}
+                    style={styles.ticketPressable}
+                  >
+                    <Image
+                      source={{ uri: voucher.ticketUrl }}
+                      style={styles.ticketImage}
+                      resizeMode="contain"
+                    />
+                  </Pressable>
+                  <Text style={styles.tapHint}>Tap to zoom voucher</Text>
+                </>
+              ) : (
+                <View style={styles.ticketPlaceholder}>
+                  <Text style={styles.placeholderText}>No image available</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.voucherName}>
+                {voucher.assignedName || voucher.voucherName || "Guest"}
+              </Text>
+              <Text style={styles.voucherSub}>
+                {voucher.assignedType || "Standard"}
+              </Text>
+
+              <View style={styles.metaContainer}>
+                <MetaRow label="Code" value={voucher.code} />
+                {voucher.assignedEmail && (
+                  <MetaRow label="Email" value={voucher.assignedEmail} />
+                )}
+                <MetaRow
+                  label="Status"
+                  value={
+                    statusDisplay.charAt(0).toUpperCase() +
+                    statusDisplay.slice(1)
+                  }
+                  color={statusColor}
+                />
+                <MetaRow label="Expires" value={expiryLabel} />
+                {sectionSide ? (
+                  <MetaRow label="Seat" value={sectionSide} />
+                ) : null}
+              </View>
+            </View>
+
+            {voucher.notes && (
+              <View style={styles.notesBox}>
+                <Text style={styles.notesLabel}>Notes</Text>
+                <Text style={styles.notesText}>{voucher.notes}</Text>
+              </View>
+            )}
+
+            <View style={styles.divider} />
+
+            {!isRedeemed ? (
+              <View style={styles.counterContainer}>
+                <Text style={styles.label}>Select Pax Entry</Text>
+                <View style={styles.counterRow}>
+                  <Pressable
+                    onPress={() => count > 1 && setCount(count - 1)}
+                    disabled={count <= 1}
+                    style={[
+                      styles.counterBtn,
+                      count <= 1 && styles.disabledBtn,
+                    ]}
+                  >
+                    <Ionicons name="remove" size={26} color="#fff" />
+                  </Pressable>
+                  <View style={styles.countDisplay}>
+                    <Text style={styles.countText}>{count}</Text>
+                    <Text style={styles.countLabel}>Pax</Text>
+                  </View>
+                  <Pressable
+                    onPress={() =>
+                      Number.isFinite(remaining) &&
+                      count < (remaining as number) &&
+                      setCount(count + 1)
+                    }
+                    disabled={
+                      !Number.isFinite(remaining) ||
+                      count >= (remaining as number)
+                    }
+                    style={[
+                      styles.counterBtn,
+                      (!Number.isFinite(remaining) ||
+                        count >= (remaining as number)) &&
+                        styles.disabledBtn,
+                    ]}
+                  >
+                    <Ionicons name="add" size={26} color="#fff" />
+                  </Pressable>
+                </View>
+                <Text style={styles.limitText}>{remainingLabel}</Text>
+              </View>
+            ) : (
+              <View style={styles.successBox}>
+                <Ionicons name="checkmark-circle" size={52} color="#071689" />
+                <Text style={styles.successTitle}>{count} Pax Admitted</Text>
+                <Text style={styles.successSub}>
+                  {Number.isFinite(remaining)
+                    ? `Remaining uses: ${remaining as number}`
+                    : "Voucher has unlimited uses."}
+                </Text>
+              </View>
+            )}
+
+            <View style={{ height: 120 }} />
+          </>
+        )}
       </ScrollView>
 
-      <View style={styles.footer}>
-        {!isRedeemed ? (
-          <Pressable
-            onPress={handleConfirm}
-            style={[
-              styles.cta,
-              (count <= 0 || maxSelectable === 0 || submitBusy) && {
-                opacity: 0.6,
-              },
-            ]}
-            disabled={count <= 0 || maxSelectable === 0 || submitBusy}
-          >
-            <Text style={styles.ctaText}>
-              {submitBusy ? "Saving..." : `Confirm & Admit ${count}`}
-            </Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={handleScanNext} style={styles.cta}>
-            <Text style={styles.ctaText}>Scan Next</Text>
-          </Pressable>
-        )}
-      </View>
+      {voucher && !loading && !loadError && (
+        <View style={styles.footer}>
+          {!isRedeemed ? (
+            <Pressable
+              onPress={handleConfirm}
+              disabled={
+                submitBusy ||
+                count <= 0 ||
+                (Number.isFinite(remaining) && (remaining as number) <= 0)
+              }
+              style={[
+                styles.cta,
+                (submitBusy ||
+                  count <= 0 ||
+                  (Number.isFinite(remaining) &&
+                    (remaining as number) <= 0)) && { opacity: 0.6 },
+              ]}
+            >
+              <Text style={styles.ctaText}>
+                {submitBusy ? "Processing..." : `Confirm & Admit (${count})`}
+              </Text>
+            </Pressable>
+          ) : (
+            <Pressable onPress={handleScanNext} style={styles.cta}>
+              <Text style={styles.ctaText}>
+                {cameFromVouchers ? "Back to list" : "Scan next"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+      )}
 
       <Modal
         visible={zoomVisible}
@@ -741,24 +575,22 @@ export default function ConfirmVoucher() {
             >
               <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
-            <Text style={styles.modalTitle}>Ticket Preview</Text>
+            <Text style={styles.modalTitle}>Voucher Preview</Text>
             <View style={{ width: 22 }} />
           </View>
 
-          <View style={styles.modalScroll}>
-            <View style={styles.modalContent}>
-              {ticketUrl && (
-                <GestureDetector gesture={composedGesture}>
-                  <Animated.View collapsable={false}>
-                    <Animated.Image
-                      source={{ uri: ticketUrl }}
-                      style={[styles.modalImage, animatedImageStyle]}
-                      resizeMode="contain"
-                    />
-                  </Animated.View>
-                </GestureDetector>
-              )}
-            </View>
+          <View style={styles.modalContent}>
+            {voucher?.ticketUrl && (
+              <GestureDetector gesture={composedGesture}>
+                <Animated.View>
+                  <Animated.Image
+                    source={{ uri: voucher.ticketUrl }}
+                    style={[styles.modalImage, animatedImageStyle]}
+                    resizeMode="contain"
+                  />
+                </Animated.View>
+              </GestureDetector>
+            )}
           </View>
         </GestureHandlerRootView>
       </Modal>
@@ -766,43 +598,55 @@ export default function ConfirmVoucher() {
   );
 }
 
+function MetaRow({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
+  return (
+    <View style={styles.metaRow}>
+      <Text style={styles.metaLabel}>{label}:</Text>
+      <Text style={[styles.metaValue, color ? { color } : null]}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
-
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ECECEC",
-    backgroundColor: "#fff",
-    zIndex: 10,
+    borderBottomColor: "#E5E7EB",
   },
   iconBtn: { padding: 6, borderRadius: 8 },
-  title: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "800" },
-
-  scrollView: { flex: 1 },
-  scrollContent: { padding: 20, alignItems: "center" },
-
+  topTitle: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#071689",
+  },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 16 },
+  centerBox: { alignItems: "center", marginTop: 40 },
+  centerText: { marginTop: 8, color: "#6B7280", fontSize: 14 },
   ticketBox: {
     width: "100%",
     borderRadius: 12,
-    overflow: "hidden",
-    marginTop: 10,
-    marginBottom: 24,
-    backgroundColor: "#F9FAFB",
     borderWidth: 1,
     borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    marginBottom: 20,
+    overflow: "hidden",
   },
-  ticketPressable: {
-    width: "100%",
-  },
-  ticketInnerShadow: {
-    padding: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  ticketPressable: { padding: 8 },
   ticketImage: {
     width: "100%",
     aspectRatio: 3 / 2,
@@ -815,143 +659,108 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   ticketPlaceholder: {
-    width: "100%",
     paddingVertical: 40,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F9FAFB",
   },
-  placeholderText: {
-    fontSize: 13,
-    color: "#9CA3AF",
+  placeholderText: { color: "#9CA3AF", fontSize: 13 },
+  card: {
+    paddingVertical: 4,
+    marginBottom: 16,
   },
-
-  card: { alignItems: "flex-start", width: "100%" },
   voucherName: {
     fontSize: 20,
     fontWeight: "800",
     color: "#111827",
-    textAlign: "left",
   },
-  metaBlock: {
-    marginTop: 8,
-    width: "100%",
-  },
-  metaLine: {
-    fontSize: 14,
-    color: "#4B5563",
+  voucherSub: {
+    fontSize: 13,
+    color: "#6B7280",
     marginTop: 2,
   },
+  metaContainer: {
+    marginTop: 12,
+    gap: 10,
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
   metaLabel: {
+    width: 110,
+    fontSize: 13,
     fontWeight: "600",
+    color: "#4B5563",
   },
   metaValue: {
-    fontWeight: "400",
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#111827",
   },
-  mono: {
-    fontFamily: "monospace",
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: "#F0F0F0",
-    width: "100%",
-    marginVertical: 24,
-  },
-
   notesBox: {
-    marginTop: 16,
-    width: "100%",
-    padding: 12,
-    borderRadius: 10,
+    padding: 10,
+    borderRadius: 8,
     backgroundColor: "#F9FAFB",
     borderWidth: 1,
     borderColor: "#E5E7EB",
+    marginBottom: 16,
   },
   notesLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     color: "#374151",
     marginBottom: 4,
   },
-  notesText: {
-    fontSize: 13,
-    color: "#4B5563",
+  notesText: { fontSize: 13, color: "#4B5563" },
+  divider: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
+    marginVertical: 20,
   },
-
-  counterContainer: { alignItems: "center", width: "100%" },
-  label: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 20,
-    fontWeight: "500",
-  },
-
+  counterContainer: { alignItems: "center" },
+  label: { fontSize: 15, fontWeight: "600", marginBottom: 14, color: "#374151" },
   counterRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    maxWidth: 280,
+    gap: 24,
+    marginBottom: 8,
   },
   counterBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: "#071689",
     alignItems: "center",
     justifyContent: "center",
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
   },
-  disabledBtn: { backgroundColor: "#CCC", elevation: 0 },
-
-  countDisplay: { alignItems: "center", width: 100 },
-  countText: { fontSize: 48, fontWeight: "800", color: "#111" },
-  countLabel: { fontSize: 14, color: "#666", fontWeight: "600" },
-
-  limitText: { marginTop: 16, color: "#999", fontSize: 12 },
-
+  disabledBtn: { backgroundColor: "#D1D5DB" },
+  countDisplay: { alignItems: "center", width: 80 },
+  countText: { fontSize: 40, fontWeight: "800", color: "#111827" },
+  countLabel: { fontSize: 12, color: "#6B7280" },
+  limitText: { fontSize: 12, color: "#6B7280", marginTop: 4 },
   successBox: { alignItems: "center", marginTop: 10 },
-  successTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111",
-    marginTop: 12,
-    textAlign: "center",
-  },
-  successSub: {
-    fontSize: 14,
-    color: "#666",
-    marginTop: 4,
-    textAlign: "center",
-  },
-
+  successTitle: { fontSize: 18, fontWeight: "700", marginTop: 8 },
+  successSub: { fontSize: 14, color: "#6B7280", marginTop: 4 },
   footer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E5E7EB",
     backgroundColor: "#fff",
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 40,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
   },
   cta: {
-    flex: 1,
-    height: 52,
+    height: 50,
     borderRadius: 10,
     backgroundColor: "#071689",
     alignItems: "center",
     justifyContent: "center",
   },
-  ctaText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-
+  ctaText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",
@@ -961,12 +770,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingTop: 40,
-    paddingBottom: 12,
+    paddingBottom: 8,
   },
   modalCloseBtn: {
     padding: 6,
-    borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.5)",
   },
   modalTitle: {
     flex: 1,
@@ -975,14 +784,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-  modalScroll: {
-    flex: 1,
-  },
   modalContent: {
-    flexGrow: 1,
+    flex: 1,
+    padding: 16,
     alignItems: "center",
     justifyContent: "center",
-    padding: 16,
   },
   modalImage: {
     width: "100%",
