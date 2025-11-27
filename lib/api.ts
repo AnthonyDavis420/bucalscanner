@@ -85,7 +85,6 @@ export type ResolveEventItem = {
   venue?: { name: string; imageUrl?: string | null } | null;
 };
 
-// New type for the public active season endpoint
 export type ActiveSeasonSummary = {
   id: string;
   title: string;
@@ -95,26 +94,36 @@ export type ActiveSeasonSummary = {
 
 type OkItem<T> = { ok: true; item: T };
 
+// --- KEY CHANGE HERE: Using process.env ---
 function getBaseUrl(): string {
-  const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL;
-  const fromExtra =
+  // 1. Try process.env (Standard for Expo 49+ with .env files)
+  const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+  if (envUrl) return envUrl.replace(/\/+$/, "");
+
+  // 2. Fallback for safety (if somehow process.env fails but app.json still has it)
+  const extraUrl =
     (Constants?.expoConfig?.extra as any)?.EXPO_PUBLIC_API_BASE_URL ||
     (Constants as any)?.manifest2?.extra?.EXPO_PUBLIC_API_BASE_URL;
-  const base = (fromEnv || fromExtra || "").trim();
-  if (!base)
-    throw new Error(
-      "Missing EXPO_PUBLIC_API_BASE_URL. Define it in app.json -> expo.extra."
-    );
-  return base.replace(/\/+$/, "");
+  
+  if (extraUrl) return extraUrl.replace(/\/+$/, "");
+
+  throw new Error(
+    "Missing EXPO_PUBLIC_API_BASE_URL. Check your .env file or EAS secrets."
+  );
 }
 
 function getScannerKey(): string | null {
-  const fromEnv = process.env.EXPO_PUBLIC_SCANNER_KEY;
-  const fromExtra =
+  // 1. Try process.env
+  if (process.env.EXPO_PUBLIC_SCANNER_KEY) {
+    return process.env.EXPO_PUBLIC_SCANNER_KEY;
+  }
+
+  // 2. Fallback
+  return (
     (Constants?.expoConfig?.extra as any)?.EXPO_PUBLIC_SCANNER_KEY ||
-    (Constants as any)?.manifest2?.extra?.EXPO_PUBLIC_SCANNER_KEY;
-  const key = (fromEnv || fromExtra || "").trim();
-  return key ? key : null;
+    (Constants as any)?.manifest2?.extra?.EXPO_PUBLIC_SCANNER_KEY ||
+    null
+  );
 }
 
 async function buildAuthHeaders(): Promise<Record<string, string>> {
@@ -216,7 +225,6 @@ async function delJson<T>(path: string): Promise<T> {
 }
 
 export const scannerApi = {
-  // --- NEW: Fetch global active season (public) ---
   async fetchActiveSeason(): Promise<{ ok: true; season: ActiveSeasonSummary | null }> {
     try {
       const res = await getJson<{ season: any }>(`/api/public/active-season`);
@@ -231,7 +239,6 @@ export const scannerApi = {
         },
       };
     } catch (e) {
-      // Silent fail to not block UI
       return { ok: true, season: null };
     }
   },
@@ -285,7 +292,6 @@ export const scannerApi = {
       )}/tickets?${sp.toString()}`
     );
 
-    // Map raw items to ensure explicit fields like purchaseType are captured
     const items: TicketSummary[] = (raw.items || []).map((t) => ({
       ...t,
       purchaseType: t.purchaseType ?? t.purchase_type ?? null,
@@ -596,7 +602,6 @@ export const scannerApi = {
     if (!server?.ok) throw new Error("Event not found");
     const src = server.item ?? server;
     
-    // Capture seasonName from backend response
     const seasonName = src.seasonName ?? src.season_name ?? src.season?.name ?? undefined;
 
     const item: ResolveEventItem = {

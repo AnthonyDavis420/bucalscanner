@@ -7,47 +7,45 @@
     "icon": "./assets/images/icon.png",
     "scheme": "bucalscanner",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-
+    "newArchEnabled": false,
     "extra": {
-      "EXPO_PUBLIC_API_BASE_URL": "https://www.bucaltrack.org",
-      "EXPO_PUBLIC_SCANNER_KEY": "bucal_scanner_jov"
+      "router": {},
+      "eas": {
+        "projectId": "046ed0db-bafb-411c-8c4c-fdf2f74e51df"
+      }
     },
-
     "ios": {
       "supportsTablet": true
     },
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#E6F4FE"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "package": "com.kitsunetitan.bucalscanner"
     },
-
     "web": {
       "output": "static",
       "favicon": "./assets/images/icon.png"
     },
-
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
-          "dark": { "backgroundColor": "#000000" }
+          "dark": {
+            "backgroundColor": "#000000"
+          }
         }
       ],
       "expo-font",
       "expo-web-browser"
     ],
-
     "experiments": {
       "typedRoutes": true
     }
