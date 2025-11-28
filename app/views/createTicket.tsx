@@ -1,11 +1,13 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, Stack } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Image,
-  Modal,
+  KeyboardAvoidingView,
+  Modal, // <--- Added this
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,8 +17,6 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { scannerApi, type EventDetails } from "../../lib/api";
 import {
   Gesture,
   GestureDetector,
@@ -27,6 +27,8 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { scannerApi, type EventDetails } from "../../lib/api";
 
 const STORAGE_KEYS = {
   eventId: "bucalscanner.activeEventId",
@@ -389,301 +391,307 @@ export default function CreateTicket() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <SafeAreaView style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          <View style={styles.headerRow}>
-            <Pressable
-              onPress={onBackPress}
-              hitSlop={10}
-              disabled={backDisabled}
-              style={{ paddingRight: 6, opacity: backDisabled ? 0.6 : 1 }}
-            >
-              <Ionicons name="arrow-back" size={22} color="#071689" />
-            </Pressable>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>{headerTitle}</Text>
-              {!!headerSubtitle && <Text style={styles.headerSubtitle}>{headerSubtitle}</Text>}
-            </View>
-            <View style={{ width: 22 }} />
-          </View>
-
-          {/* Preview box styled like confirmVoucher */}
-          <View style={styles.ticketBox}>
-            <Pressable
-              style={styles.ticketPressable}
-              onPress={() => {
-                // reset zoom + pan when opening viewer
-                mapScale.value = 1;
-                mapTranslateX.value = 0;
-                mapTranslateY.value = 0;
-                setImgViewerVisible(true);
-              }}
-            >
-              <View style={styles.ticketInnerShadow}>
-                <Image
-                  source={{ uri: venueImageUri }}
-                  style={styles.ticketImage}
-                  resizeMode="contain"
-                />
-              </View>
-            </Pressable>
-            <Text style={styles.ticketTapHint}>Tap seating map to zoom</Text>
-          </View>
-
-          <View style={styles.ticketCountCard}>
-            <Text style={styles.ticketCountTitle}>Number of Tickets</Text>
-            <View style={styles.ticketCountRow}>
-              <View style={styles.ticketCountItem}>
-                <Text style={styles.ticketCountLabel}>Adults</Text>
-                <View style={[styles.selectBtn, { opacity: 0.6 }]}>
-                  <Text style={styles.selectText}>1</Text>
-                  <Ionicons name="chevron-down" size={16} color="#222" style={{ opacity: 0 }} />
-                </View>
-              </View>
-
-              <View style={styles.ticketCountItem}>
-                <Text style={styles.ticketCountLabel}>Children</Text>
-                <Pressable
-                  style={styles.selectBtn}
-                  onPress={() =>
-                    setOpenDropdown((prev) => (prev === "children" ? null : "children"))
-                  }
-                >
-                  <Text style={styles.selectText}>{children}</Text>
-                  <Ionicons name="chevron-down" size={16} color="#222" />
-                </Pressable>
-                {openDropdown === "children" && (
-                  <View style={styles.dropdownMenu}>
-                    {Array.from({ length: maxChildrenForAdults(adults) + 1 }, (_, i) => i).map(
-                      (n) => (
-                        <Pressable
-                          key={n}
-                          onPress={() => setChildrenCount(n)}
-                          style={[
-                            styles.optionItem,
-                            children === n && styles.optionActive,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.optionText,
-                              children === n && styles.optionTextActive,
-                            ]}
-                          >
-                            {n}
-                          </Text>
-                        </Pressable>
-                      )
-                    )}
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.ticketCountItem}>
-                <Text style={styles.ticketCountLabel}>Total</Text>
-                <Text style={styles.ticketCountTotal}>{1 + children}</Text>
-              </View>
-            </View>
-            <Text style={styles.ticketCountNote}>Maximum of 3 child tickets per adult ticket</Text>
-          </View>
-
-          {children > 0 && (
-            <View style={styles.typeToggle}>
+        {/* WRAPPER ADDED HERE */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+            <View style={styles.headerRow}>
               <Pressable
-                onPress={() => setIsAdultsView(true)}
-                style={[styles.typeBtn, isAdultsView && styles.typeBtnActive]}
+                onPress={onBackPress}
+                hitSlop={10}
+                disabled={backDisabled}
+                style={{ paddingRight: 6, opacity: backDisabled ? 0.6 : 1 }}
               >
-                <Text style={[styles.typeBtnText, isAdultsView && styles.typeBtnTextActive]}>
-                  Adults
-                </Text>
+                <Ionicons name="arrow-back" size={22} color="#071689" />
               </Pressable>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.headerTitle}>{headerTitle}</Text>
+                {!!headerSubtitle && <Text style={styles.headerSubtitle}>{headerSubtitle}</Text>}
+              </View>
+              <View style={{ width: 22 }} />
+            </View>
+
+            {/* Preview box styled like confirmVoucher */}
+            <View style={styles.ticketBox}>
               <Pressable
+                style={styles.ticketPressable}
                 onPress={() => {
-                  setIsAdultsView(false);
-                  setChildIndex((idx) => (idx < childTickets.length ? idx : 0));
+                  // reset zoom + pan when opening viewer
+                  mapScale.value = 1;
+                  mapTranslateX.value = 0;
+                  mapTranslateY.value = 0;
+                  setImgViewerVisible(true);
                 }}
-                style={[styles.typeBtn, !isAdultsView && styles.typeBtnActive]}
               >
-                <Text style={[styles.typeBtnText, !isAdultsView && styles.typeBtnTextActive]}>
-                  Children
-                </Text>
+                <View style={styles.ticketInnerShadow}>
+                  <Image
+                    source={{ uri: venueImageUri }}
+                    style={styles.ticketImage}
+                    resizeMode="contain"
+                  />
+                </View>
               </Pressable>
+              <Text style={styles.ticketTapHint}>Tap seating map to zoom</Text>
             </View>
-          )}
 
-          <View style={styles.ticketCard}>
-            {!current ? (
-              <Text>No tickets selected.</Text>
-            ) : (
-              <>
-                <Text style={styles.ticketTitle}>
-                  {current.isChild
-                    ? `Child Ticket${
-                        childTickets.length > 1
-                          ? ` (${childIndex + 1} of ${childTickets.length})`
-                          : ""
-                      }`
-                    : "Adult Ticket"}
-                </Text>
-
-                <View style={styles.dualRow}>
-                  <View style={styles.fullNameContainer}>
-                    <Text style={styles.label}>Full Name</Text>
-                    <TextInput
-                      value={current?.fullName || ""}
-                      onChangeText={(v) =>
-                        updateTicket(tickets.indexOf(current), { fullName: v })
-                      }
-                      style={styles.input}
-                    />
-                  </View>
-                  <View style={styles.ageBox}>
-                    <Text style={styles.label}>Age{current.isChild ? " (1–12)" : ""}</Text>
-                    <TextInput
-                      value={current?.age || ""}
-                      onChangeText={(v) => onChangeAge(tickets.indexOf(current), v)}
-                      style={styles.input}
-                      keyboardType="number-pad"
-                    />
+            <View style={styles.ticketCountCard}>
+              <Text style={styles.ticketCountTitle}>Number of Tickets</Text>
+              <View style={styles.ticketCountRow}>
+                <View style={styles.ticketCountItem}>
+                  <Text style={styles.ticketCountLabel}>Adults</Text>
+                  <View style={[styles.selectBtn, { opacity: 0.6 }]}>
+                    <Text style={styles.selectText}>1</Text>
+                    <Ionicons name="chevron-down" size={16} color="#222" style={{ opacity: 0 }} />
                   </View>
                 </View>
 
-                {!current.isChild && (
-                  <View>
-                    <Text style={styles.label}>Number</Text>
-                    <TextInput
-                      value={current?.number || ""}
-                      onChangeText={(v) => onChangeNumber(tickets.indexOf(current), v)}
-                      style={styles.input}
-                      keyboardType="number-pad"
-                    />
-                  </View>
-                )}
-
-                <View style={[styles.sectionFullWidth, { position: "relative" }]}>
-                  <Text style={styles.label}>Section</Text>
+                <View style={styles.ticketCountItem}>
+                  <Text style={styles.ticketCountLabel}>Children</Text>
                   <Pressable
                     style={styles.selectBtn}
-                    disabled={loadingEvent || options.length === 0}
                     onPress={() =>
-                      setOpenDropdown((prev) =>
-                        prev === tickets.indexOf(current) ? null : tickets.indexOf(current)
-                      )
+                      setOpenDropdown((prev) => (prev === "children" ? null : "children"))
                     }
                   >
-                    <Text style={styles.selectText}>
-                      {current?.section && current?.side
-                        ? `${current.section} – ${current.side}`
-                        : loadingEvent
-                        ? "Loading..."
-                        : options.length
-                        ? "Select section"
-                        : "No sections available"}
-                    </Text>
+                    <Text style={styles.selectText}>{children}</Text>
                     <Ionicons name="chevron-down" size={16} color="#222" />
                   </Pressable>
-
-                  {openDropdown === tickets.indexOf(current) && options.length > 0 && (
+                  {openDropdown === "children" && (
                     <View style={styles.dropdownMenu}>
-                      {options.map((opt, i) => {
-                        const active =
-                          current?.section === opt.section && current?.side === opt.side;
-                        return (
+                      {Array.from({ length: maxChildrenForAdults(adults) + 1 }, (_, i) => i).map(
+                        (n) => (
                           <Pressable
-                            key={i}
-                            onPress={() => onPickSection(tickets.indexOf(current), opt)}
-                            style={[styles.optionItem, active && styles.optionActive]}
+                            key={n}
+                            onPress={() => setChildrenCount(n)}
+                            style={[
+                              styles.optionItem,
+                              children === n && styles.optionActive,
+                            ]}
                           >
-                            <Text style={[styles.optionText, active && styles.optionTextActive]}>
-                              {opt.label}
-                              {!current.isChild ? ` • ₱${opt.price}` : " • ₱0"}
+                            <Text
+                              style={[
+                                styles.optionText,
+                                children === n && styles.optionTextActive,
+                              ]}
+                            >
+                              {n}
                             </Text>
                           </Pressable>
-                        );
-                      })}
+                        )
+                      )}
                     </View>
                   )}
                 </View>
 
-                {!current.isChild && (
-                  <View style={styles.ticketOptions}>
-                    <View style={styles.pwdRow}>
-                      <Text style={styles.pwdLabel}>PWD/Senior Citizen/Pregnant Woman</Text>
-                      <Switch
-                        value={!!current.isPWD}
-                        onValueChange={(next) => requestTogglePWD(tickets.indexOf(current), next)}
-                        thumbColor={current.isPWD ? "#071689" : "#f4f3f4"}
-                        trackColor={{ false: "#D1D5DB", true: "#BFD0FF" }}
+                <View style={styles.ticketCountItem}>
+                  <Text style={styles.ticketCountLabel}>Total</Text>
+                  <Text style={styles.ticketCountTotal}>{1 + children}</Text>
+                </View>
+              </View>
+              <Text style={styles.ticketCountNote}>Maximum of 3 child tickets per adult ticket</Text>
+            </View>
+
+            {children > 0 && (
+              <View style={styles.typeToggle}>
+                <Pressable
+                  onPress={() => setIsAdultsView(true)}
+                  style={[styles.typeBtn, isAdultsView && styles.typeBtnActive]}
+                >
+                  <Text style={[styles.typeBtnText, isAdultsView && styles.typeBtnTextActive]}>
+                    Adults
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setIsAdultsView(false);
+                    setChildIndex((idx) => (idx < childTickets.length ? idx : 0));
+                  }}
+                  style={[styles.typeBtn, !isAdultsView && styles.typeBtnActive]}
+                >
+                  <Text style={[styles.typeBtnText, !isAdultsView && styles.typeBtnTextActive]}>
+                    Children
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
+            <View style={styles.ticketCard}>
+              {!current ? (
+                <Text>No tickets selected.</Text>
+              ) : (
+                <>
+                  <Text style={styles.ticketTitle}>
+                    {current.isChild
+                      ? `Child Ticket${
+                          childTickets.length > 1
+                            ? ` (${childIndex + 1} of ${childTickets.length})`
+                            : ""
+                        }`
+                      : "Adult Ticket"}
+                  </Text>
+
+                  <View style={styles.dualRow}>
+                    <View style={styles.fullNameContainer}>
+                      <Text style={styles.label}>Full Name</Text>
+                      <TextInput
+                        value={current?.fullName || ""}
+                        onChangeText={(v) =>
+                          updateTicket(tickets.indexOf(current), { fullName: v })
+                        }
+                        style={styles.input}
+                      />
+                    </View>
+                    <View style={styles.ageBox}>
+                      <Text style={styles.label}>Age{current.isChild ? " (1–12)" : ""}</Text>
+                      <TextInput
+                        value={current?.age || ""}
+                        onChangeText={(v) => onChangeAge(tickets.indexOf(current), v)}
+                        style={styles.input}
+                        keyboardType="number-pad"
                       />
                     </View>
                   </View>
-                )}
 
-                {current.isChild && childTickets.length > 1 && (
-                  <View style={styles.childNavRow}>
+                  {!current.isChild && (
+                    <View>
+                      <Text style={styles.label}>Number</Text>
+                      <TextInput
+                        value={current?.number || ""}
+                        onChangeText={(v) => onChangeNumber(tickets.indexOf(current), v)}
+                        style={styles.input}
+                        keyboardType="number-pad"
+                      />
+                    </View>
+                  )}
+
+                  <View style={[styles.sectionFullWidth, { position: "relative" }]}>
+                    <Text style={styles.label}>Section</Text>
                     <Pressable
-                      onPress={() => setChildIndex((i) => Math.max(0, i - 1))}
-                      disabled={childIndex === 0}
-                      style={[styles.childNavBtn, childIndex === 0 && { opacity: 0.5 }]}
-                    >
-                      <Text style={styles.childNavBtnText}>Previous</Text>
-                    </Pressable>
-                    <Text style={styles.childNavLabel}>
-                      {childIndex + 1} / {childTickets.length}
-                    </Text>
-                    <Pressable
+                      style={styles.selectBtn}
+                      disabled={loadingEvent || options.length === 0}
                       onPress={() =>
-                        setChildIndex((i) => Math.min(childTickets.length - 1, i + 1))
+                        setOpenDropdown((prev) =>
+                          prev === tickets.indexOf(current) ? null : tickets.indexOf(current)
+                        )
                       }
-                      disabled={childIndex >= childTickets.length - 1}
-                      style={[
-                        styles.childNavBtn,
-                        childIndex >= childTickets.length - 1 && { opacity: 0.5 },
-                      ]}
                     >
-                      <Text style={styles.childNavBtnText}>Next</Text>
+                      <Text style={styles.selectText}>
+                        {current?.section && current?.side
+                          ? `${current.section} – ${current.side}`
+                          : loadingEvent
+                          ? "Loading..."
+                          : options.length
+                          ? "Select section"
+                          : "No sections available"}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#222" />
                     </Pressable>
+
+                    {openDropdown === tickets.indexOf(current) && options.length > 0 && (
+                      <View style={styles.dropdownMenu}>
+                        {options.map((opt, i) => {
+                          const active =
+                            current?.section === opt.section && current?.side === opt.side;
+                          return (
+                            <Pressable
+                              key={i}
+                              onPress={() => onPickSection(tickets.indexOf(current), opt)}
+                              style={[styles.optionItem, active && styles.optionActive]}
+                            >
+                              <Text style={[styles.optionText, active && styles.optionTextActive]}>
+                                {opt.label}
+                                {!current.isChild ? ` • ₱${opt.price}` : " • ₱0"}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    )}
                   </View>
-                )}
-              </>
-            )}
-          </View>
 
-          <View style={styles.subtotalSection}>
-            <Text style={styles.subtotalTitle}>Subtotal:</Text>
-            {tickets.map((t, i) => (
-              <View key={i} style={styles.lineItemRow}>
-                <Text style={styles.lineItemLeft}>
-                  1x {t.section ? `${t.section} (${t.side})` : "Unassigned"}{" "}
-                  {t.isChild ? "(Child)" : "(Adult)"}
-                </Text>
-                <Text style={styles.lineItemRight}>₱{t.price || 0}</Text>
-              </View>
-            ))}
-            <View style={styles.hr} />
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>₱{subtotal}</Text>
+                  {!current.isChild && (
+                    <View style={styles.ticketOptions}>
+                      <View style={styles.pwdRow}>
+                        <Text style={styles.pwdLabel}>PWD/Senior Citizen/Pregnant Woman</Text>
+                        <Switch
+                          value={!!current.isPWD}
+                          onValueChange={(next) => requestTogglePWD(tickets.indexOf(current), next)}
+                          thumbColor={current.isPWD ? "#071689" : "#f4f3f4"}
+                          trackColor={{ false: "#D1D5DB", true: "#BFD0FF" }}
+                        />
+                      </View>
+                    </View>
+                  )}
+
+                  {current.isChild && childTickets.length > 1 && (
+                    <View style={styles.childNavRow}>
+                      <Pressable
+                        onPress={() => setChildIndex((i) => Math.max(0, i - 1))}
+                        disabled={childIndex === 0}
+                        style={[styles.childNavBtn, childIndex === 0 && { opacity: 0.5 }]}
+                      >
+                        <Text style={styles.childNavBtnText}>Previous</Text>
+                      </Pressable>
+                      <Text style={styles.childNavLabel}>
+                        {childIndex + 1} / {childTickets.length}
+                      </Text>
+                      <Pressable
+                        onPress={() =>
+                          setChildIndex((i) => Math.min(childTickets.length - 1, i + 1))
+                        }
+                        disabled={childIndex >= childTickets.length - 1}
+                        style={[
+                          styles.childNavBtn,
+                          childIndex >= childTickets.length - 1 && { opacity: 0.5 },
+                        ]}
+                      >
+                        <Text style={styles.childNavBtnText}>Next</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </>
+              )}
             </View>
-          </View>
 
-          <View style={styles.actionsRow}>
-            <Pressable onPress={onBackPress} style={styles.backBtn} disabled={backDisabled}>
-              <Text style={styles.backBtnText}>Back</Text>
-            </Pressable>
-            <Pressable
-              onPress={onProceed}
-              disabled={tickets.length === 0 || tickets.some((t) => ticketErrors(t).length > 0)}
-              style={[
-                styles.nextBtn,
-                (tickets.length === 0 || tickets.some((t) => ticketErrors(t).length > 0)) && {
-                  backgroundColor: "#9CA3AF",
-                },
-              ]}
-            >
-              <Text style={styles.nextBtnText}>Confirm Payment</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
+            <View style={styles.subtotalSection}>
+              <Text style={styles.subtotalTitle}>Subtotal:</Text>
+              {tickets.map((t, i) => (
+                <View key={i} style={styles.lineItemRow}>
+                  <Text style={styles.lineItemLeft}>
+                    1x {t.section ? `${t.section} (${t.side})` : "Unassigned"}{" "}
+                    {t.isChild ? "(Child)" : "(Adult)"}
+                  </Text>
+                  <Text style={styles.lineItemRight}>₱{t.price || 0}</Text>
+                </View>
+              ))}
+              <View style={styles.hr} />
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>₱{subtotal}</Text>
+              </View>
+            </View>
+
+            <View style={styles.actionsRow}>
+              <Pressable onPress={onBackPress} style={styles.backBtn} disabled={backDisabled}>
+                <Text style={styles.backBtnText}>Back</Text>
+              </Pressable>
+              <Pressable
+                onPress={onProceed}
+                disabled={tickets.length === 0 || tickets.some((t) => ticketErrors(t).length > 0)}
+                style={[
+                  styles.nextBtn,
+                  (tickets.length === 0 || tickets.some((t) => ticketErrors(t).length > 0)) && {
+                    backgroundColor: "#9CA3AF",
+                  },
+                ]}
+              >
+                <Text style={styles.nextBtnText}>Confirm Payment</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
 
       <Modal visible={warnVisible} transparent animationType="fade" onRequestClose={cancelTogglePWD}>

@@ -1,6 +1,7 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { scannerApi, type TicketSummary } from "@/lib/api";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import React, {
   useCallback,
@@ -17,11 +18,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
-  ScrollView,
+  View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { scannerApi, type TicketSummary } from "@/lib/api";
 
 // --- Types ---
 
