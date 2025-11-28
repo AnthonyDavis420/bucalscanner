@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   BackHandler,
   Image,
@@ -10,10 +11,8 @@ import {
   StyleSheet,
   Text,
   View,
-  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { scannerApi } from "../../lib/api";
 
 const STORAGE_KEYS = {
@@ -37,14 +36,26 @@ export default function Welcome() {
   const [counts, setCounts] = useState({ tickets: 0, vouchers: 0 });
   const [loadingCounts, setLoadingCounts] = useState(true);
 
-  useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (showExit) setShowExit(false);
-      else setShowExit(true);
-      return true;
-    });
-    return () => sub.remove();
-  }, [showExit]);
+  // --- CHANGED: Use useFocusEffect instead of useEffect for BackHandler ---
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (showExit) {
+          setShowExit(false);
+        } else {
+          setShowExit(true);
+        }
+        return true; // Prevent default behavior (exiting app)
+      };
+
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        onBackPress
+      );
+
+      return () => subscription.remove();
+    }, [showExit])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -168,8 +179,8 @@ export default function Welcome() {
                 <View style={styles.statDivider} />
 
                 <Pressable
-                   style={({ pressed }) => [styles.statItem, pressed && { opacity: 0.7 }]}
-                   onPress={() => ensureEventSelected(() => router.push("/views/allVouchers"))}
+                    style={({ pressed }) => [styles.statItem, pressed && { opacity: 0.7 }]}
+                    onPress={() => ensureEventSelected(() => router.push("/views/allVouchers"))}
                 >
                   <Text style={styles.statNumber}>{counts.vouchers}</Text>
                   <Text style={styles.statLabel}>Total Vouchers</Text>
@@ -236,16 +247,16 @@ export default function Welcome() {
             onPress={() => setShowExit(false)}
           />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Exit app?</Text>
+            <Text style={styles.modalTitle}>Return to Home?</Text>
             <Text style={styles.modalText}>
-              You’re on the home screen. Do you want to exit BucalScanner?
+              You are about to leave the event dashboard.
             </Text>
 
             <View style={styles.modalRow}>
               <Pressable
                 onPress={() => {
                   setShowExit(false);
-                  BackHandler.exitApp();
+                  handleChangeEvent();
                 }}
                 style={({ pressed }) => [
                   styles.modalDanger,

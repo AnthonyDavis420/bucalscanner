@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -35,13 +36,11 @@ export default function Index() {
 
   const isValid = useMemo(() => eventId.trim().length > 0, [eventId]);
 
-  // Initialize State & Fetch Active Season Context
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        // 1. Load local data first
         const [savedId, savedName] = await AsyncStorage.multiGet([
           STORAGE_KEYS.eventId,
           STORAGE_KEYS.seasonName,
@@ -65,16 +64,14 @@ export default function Index() {
           }
         }
 
-        // 2. Fetch Global Active Season from API (Fallback/Update)
         try {
           const res = await scannerApi.fetchActiveSeason();
           if (!cancelled && res.season?.title) {
             setSavedSeasonName(res.season.title);
-            // Optional: update storage so it's there next time immediately
             await AsyncStorage.setItem(STORAGE_KEYS.seasonName, res.season.title);
           }
         } catch (err) {
-          // Ignore API errors, keep using local or empty
+          // Ignore API errors
         }
 
       } finally {
@@ -96,7 +93,6 @@ export default function Index() {
       const res = await scannerApi.resolveEvent(trimmed);
       const { seasonId, eventId: resolvedEventId, name, seasonName } = res.item;
       
-      // Prefer the season name from the specific event resolution, otherwise fall back to global active
       const finalSeasonName = seasonName || savedSeasonName || "";
 
       await AsyncStorage.multiSet([
@@ -125,60 +121,65 @@ export default function Index() {
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
-        behavior={Platform.select({ ios: "padding", android: undefined })}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.container}>
-            <View style={styles.headerBlock}>
-              <Text style={styles.welcome}>Welcome to</Text>
-              <Text style={styles.brand}>BucalScanner!</Text>
-            </View>
+        <ScrollView 
+          contentContainerStyle={styles.scrollContainer} 
+          keyboardShouldPersistTaps="handled"
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.container}>
+              <View style={styles.headerBlock}>
+                <Text style={styles.welcome}>Welcome to</Text>
+                <Text style={styles.brand}>BucalScanner!</Text>
+              </View>
 
-            <Image
-              source={require("../assets/bucal-logo.png")}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-
-            {savedSeasonName ? (
-              <Text style={styles.seasonName}>{savedSeasonName}</Text>
-            ) : null}
-
-            <View style={styles.formBlock}>
-              <Text style={styles.label}>Please enter the Event ID:</Text>
-
-              <TextInput
-                value={eventId}
-                onChangeText={setEventId}
-                placeholder="e.g., YDPUEX"
-                placeholderTextColor="#999"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-                returnKeyType="done"
-                onSubmitEditing={handleContinue}
-                autoFocus={!eventId} 
+              <Image
+                source={require("../assets/images/icon.png")}
+                style={styles.logo}
+                resizeMode="contain"
               />
 
-              <Pressable
-                onPress={handleContinue}
-                disabled={!isValid || loading}
-                style={({ pressed }) => [
-                  styles.button,
-                  (!isValid || loading) && styles.buttonDisabled,
-                  pressed && isValid && !loading && styles.buttonPressed,
-                ]}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.buttonText}>Enter</Text>
-                )}
-              </Pressable>
+              {savedSeasonName ? (
+                <Text style={styles.seasonName}>{savedSeasonName}</Text>
+              ) : null}
+
+              <View style={styles.formBlock}>
+                <Text style={styles.label}>Please enter the Event ID:</Text>
+
+                <TextInput
+                  value={eventId}
+                  onChangeText={setEventId}
+                  placeholder="e.g., YDPUEX"
+                  placeholderTextColor="#999"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.input}
+                  returnKeyType="done"
+                  onSubmitEditing={handleContinue}
+                  autoFocus={!eventId} 
+                />
+
+                <Pressable
+                  onPress={handleContinue}
+                  disabled={!isValid || loading}
+                  style={({ pressed }) => [
+                    styles.button,
+                    (!isValid || loading) && styles.buttonDisabled,
+                    pressed && isValid && !loading && styles.buttonPressed,
+                  ]}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.buttonText}>Enter</Text>
+                  )}
+                </Pressable>
+              </View>
             </View>
-          </View>
-        </TouchableWithoutFeedback>
+          </TouchableWithoutFeedback>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -189,11 +190,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
   },
+  scrollContainer: {
+    flexGrow: 1,
+  },
   container: {
-    flex: 1,
+    flex: 1, 
+    width: "100%",
     paddingHorizontal: 24,
     alignItems: "center",
     justifyContent: "center",
+    paddingBottom: 20,
   },
   center: {
     justifyContent: "center",
@@ -222,8 +228,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   logo: {
-    width: 160,
-    height: 160,
+    width: 250,
+    height: 250,
     marginVertical: 32,
   },
   formBlock: {

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "bucalscanner",
+    "name": "Bucal Scanner",
     "slug": "bucalscanner",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "bucalscanner",
+    "scheme": "Bucal Scanner",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "extra": {
@@ -19,7 +19,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon.png",
+        "foregroundImage": "./assets/images/adaptiveIcon.png",
         "backgroundColor": "#E6F4FE"
       },
       "edgeToEdgeEnabled": true,
