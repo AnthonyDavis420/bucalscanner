@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Image,
   KeyboardAvoidingView,
-  Modal, // <--- Added this
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -436,9 +436,12 @@ export default function CreateTicket() {
               <Text style={styles.ticketTapHint}>Tap seating map to zoom</Text>
             </View>
 
-            <View style={styles.ticketCountCard}>
+            {/* FIX: Added zIndex: 100 here so this container sits on top of the next card */}
+            <View style={[styles.ticketCountCard, { zIndex: 100 }]}>
               <Text style={styles.ticketCountTitle}>Number of Tickets</Text>
-              <View style={styles.ticketCountRow}>
+              
+              {/* FIX: Added zIndex: 100 here so the row is elevated */}
+              <View style={[styles.ticketCountRow, { zIndex: 100 }]}>
                 <View style={styles.ticketCountItem}>
                   <Text style={styles.ticketCountLabel}>Adults</Text>
                   <View style={[styles.selectBtn, { opacity: 0.6 }]}>
@@ -447,7 +450,8 @@ export default function CreateTicket() {
                   </View>
                 </View>
 
-                <View style={styles.ticketCountItem}>
+                {/* FIX: Added zIndex: 100 here so this specific item (Children) overlaps others */}
+                <View style={[styles.ticketCountItem, { zIndex: 100 }]}>
                   <Text style={styles.ticketCountLabel}>Children</Text>
                   <Pressable
                     style={styles.selectBtn}
@@ -494,7 +498,7 @@ export default function CreateTicket() {
             </View>
 
             {children > 0 && (
-              <View style={styles.typeToggle}>
+              <View style={[styles.typeToggle, { zIndex: 1 }]}>
                 <Pressable
                   onPress={() => setIsAdultsView(true)}
                   style={[styles.typeBtn, isAdultsView && styles.typeBtnActive]}
@@ -517,7 +521,8 @@ export default function CreateTicket() {
               </View>
             )}
 
-            <View style={styles.ticketCard}>
+            {/* This card is naturally below, so we keep default zIndex (0 or 1) */}
+            <View style={[styles.ticketCard, { zIndex: 1 }]}>
               {!current ? (
                 <Text>No tickets selected.</Text>
               ) : (
@@ -566,7 +571,7 @@ export default function CreateTicket() {
                     </View>
                   )}
 
-                  <View style={[styles.sectionFullWidth, { position: "relative" }]}>
+                  <View style={[styles.sectionFullWidth, { position: "relative", zIndex: 50 }]}>
                     <Text style={styles.label}>Section</Text>
                     <Pressable
                       style={styles.selectBtn}
@@ -655,7 +660,7 @@ export default function CreateTicket() {
               )}
             </View>
 
-            <View style={styles.subtotalSection}>
+            <View style={[styles.subtotalSection, { zIndex: -1 }]}>
               <Text style={styles.subtotalTitle}>Subtotal:</Text>
               {tickets.map((t, i) => (
                 <View key={i} style={styles.lineItemRow}>
