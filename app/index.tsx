@@ -71,7 +71,6 @@ export default function Index() {
             await AsyncStorage.setItem(STORAGE_KEYS.seasonName, res.season.title);
           }
         } catch (err) {
-          // Ignore API errors
         }
 
       } finally {

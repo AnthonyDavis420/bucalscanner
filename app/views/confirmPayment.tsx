@@ -1,4 +1,3 @@
-// app/views/confirmPayment.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -73,7 +72,7 @@ export default function ConfirmPayment() {
 
   const eventId = String(params.eventId || "");
   const seasonId = String(params.seasonId || "");
-  const eventTitle = String(params.eventName || ""); // use real event name if the previous screen passes it
+  const eventTitle = String(params.eventName || "");
 
   const goBackToCreate = useCallback(() => {
     router.back();
@@ -88,7 +87,6 @@ export default function ConfirmPayment() {
     try {
       await scannerApi.cancelTickets(eventId, seasonId, ids, bundleId);
     } catch {
-      // ignore cleanup errors
     } finally {
       cleaningRef.current = false;
       createdIdsRef.current = [];
@@ -239,7 +237,6 @@ export default function ConfirmPayment() {
               seasonId,
               bundleId: bundleId || "",
 
-              // single-ticket fallback
               ticketId: t.id,
               ticketUrl: t.url,
             },

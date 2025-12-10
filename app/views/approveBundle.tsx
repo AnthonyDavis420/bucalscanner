@@ -179,7 +179,6 @@ export default function ApproveBundle() {
     resetZoom();
   };
 
-  // 🔁 Always refetch bundle tickets to get reliable preview URLs
   useEffect(() => {
     if (!eventId || !seasonId || !bundleId) {
       setLoading(false);
@@ -235,10 +234,8 @@ export default function ApproveBundle() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, seasonId, bundleId]);
 
-  // Clamp index if tickets change
   useEffect(() => {
     if (!tickets.length) {
       setCurrentIndex(0);
@@ -251,12 +248,10 @@ export default function ApproveBundle() {
     });
   }, [tickets.length]);
 
-  // Reset zoom when changing ticket while modal is open
   useEffect(() => {
     if (zoomVisible) {
       resetZoom();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, zoomVisible]);
 
   const bundleCount =
@@ -283,7 +278,6 @@ export default function ApproveBundle() {
     });
   };
 
-  // 🔧 FIX: always pop one screen (scanner / tickets below)
   const goBackToTickets = () => {
     router.back();
   };

@@ -1,4 +1,3 @@
-// app/views/confirmReserved.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -66,7 +65,7 @@ export default function ConfirmReserved() {
     side?: string | string[];
     totalAmount?: string | string[];
     refNumber?: string | string[];
-    source?: string | string[]; // 👈 NEW
+    source?: string | string[];
   }>();
 
   const eventId = asString(params.eventId, "");
@@ -79,7 +78,7 @@ export default function ConfirmReserved() {
   const sideParam = asString(params.side, "");
   const totalAmountParam = asString(params.totalAmount, "");
   const refNumberParam = asString(params.refNumber, "");
-  const source = asString(params.source, "tickets"); // 👈 NEW
+  const source = asString(params.source, "tickets");
 
   const [loading, setLoading] = useState(true);
   const [finalizing, setFinalizing] = useState(false);
@@ -88,7 +87,6 @@ export default function ConfirmReserved() {
 
   const hasLoaded = useRef(false);
 
-  // zoom state
   const [zoomVisible, setZoomVisible] = useState(false);
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -151,7 +149,6 @@ export default function ConfirmReserved() {
         setLoading(true);
         setError(null);
 
-        // Fallback mode – use route params only
         if (!eventId || !seasonId || !ticketId) {
           const fallback: UITicket = {
             id: ticketId || refNumberParam || "unknown",
@@ -168,7 +165,6 @@ export default function ConfirmReserved() {
           return;
         }
 
-        // Full-context mode – fetch from API for real preview
         const res = await scannerApi.fetchTickets(eventId, seasonId, [ticketId]);
         const first = Array.isArray(res.items) ? res.items[0] : undefined;
 
@@ -177,7 +173,6 @@ export default function ConfirmReserved() {
         if (first) {
           setTicket(mapSummaryToUi(first));
         } else {
-          // API returned nothing, still show something based on params
           setTicket({
             id: ticketId,
             url: ticketUrlParam || "",
@@ -253,7 +248,7 @@ export default function ConfirmReserved() {
             totalAmountParam ||
             (ticket.price != null ? String(ticket.price) : ""),
           refNumber: refNumberParam || ticket.id,
-          source, // 👈 forward where we came from
+          source,
         },
       });
     } catch (e: any) {
@@ -262,7 +257,6 @@ export default function ConfirmReserved() {
     }
   };
 
-  // Amount formatting similar to bundle: always show as ₱X.XX if numeric
   let amountValue: number | null = null;
   if (totalAmountParam) {
     const n = Number(totalAmountParam);
@@ -483,8 +477,6 @@ const styles = StyleSheet.create({
   },
   muted: { color: "#6B7280" },
   errorText: { color: "#E53935", fontWeight: "700", textAlign: "center" },
-
-  // preview box (mirrors bundle style)
   ticketBox: {
     width: "100%",
     borderRadius: 12,
@@ -589,8 +581,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-
-  // modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",

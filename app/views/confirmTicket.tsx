@@ -487,9 +487,6 @@ export default function ConfirmTicket() {
 
     const isChild = normalized === "child";
 
-    // For list mode (coming from AllTickets), only auto-load bundle context
-    // when we're viewing a CHILD ticket. Adult/priority "Adult only" should
-    // stay truly single.
     if (!isChild) return;
     if (!eventIdFromParams || !seasonIdFromParams) return;
 
@@ -529,9 +526,7 @@ export default function ConfirmTicket() {
           setBundleTickets(sorted as BundleTicket[]);
         }
       } catch (e) {
-        // ignore for now
       } finally {
-        // no-op
       }
     })();
 
@@ -773,7 +768,6 @@ export default function ConfirmTicket() {
             return tType === "child";
           });
 
-          // simulate this parent becoming invalid
           const updatedAdults = adults.map((a) =>
             a.id === ticket.id
               ? ({ ...a, status: "invalid" } as BundleTicket)
@@ -788,12 +782,8 @@ export default function ConfirmTicket() {
           const updates: { id: string; status: UpdatableStatus }[] = [
             { id: ticket.id, status: "invalid" },
           ];
-
-          // FIX: If all adults are invalid, invalidate ALL children
-          // (Previously this skipped 'redeemed' children)
           if (allAdultsInvalid) {
             children.forEach((child) => {
-              // We invalidate the child regardless of current status
               updates.push({ id: child.id, status: "invalid" });
             });
           }
@@ -831,8 +821,6 @@ export default function ConfirmTicket() {
         }
         return;
       }
-
-      // --- NO CTX / STANDARD UPDATE (unchanged) ---
       if (!ctx) {
         setStatus(nextStatus);
         setTicket((prev) =>
@@ -911,7 +899,6 @@ export default function ConfirmTicket() {
         });
 
         // 2. Check if we are reverting from REDEEMED state
-        // If we revert this adult, will any redeemed adults remain?
         const remainingRedeemedAdults = adults.filter(a => {
            const s = String((a as any).status || "").toLowerCase();
            return s === 'redeemed' && a.id !== ticket.id; 
@@ -921,8 +908,6 @@ export default function ConfirmTicket() {
           { id: ticket.id, status: "active" },
         ];
 
-        // SCENARIO A: Reviving from Invalid
-        // If they were all invalid, and we make one active, we can revive the invalid children
         if (allAdultsInvalidBefore) {
           children.forEach((child) => {
             const s = String((child as any).status || "").toLowerCase();
@@ -931,9 +916,6 @@ export default function ConfirmTicket() {
             }
           });
         }
-
-        // SCENARIO B: Reverting from Redeemed
-        // If there are NO redeemed adults left after this, all redeemed children must revert to active
         if (status === 'redeemed' && remainingRedeemedAdults === 0) {
              children.forEach((child) => {
                 const s = String((child as any).status || "").toLowerCase();
@@ -977,8 +959,6 @@ export default function ConfirmTicket() {
       }
       return;
     }
-
-    // --- NO CTX / STANDARD REVERT (unchanged) ---
     if (!ctx) {
       setStatus("active");
       setTicket((prev) =>

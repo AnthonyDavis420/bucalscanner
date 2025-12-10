@@ -107,7 +107,6 @@ export default function ApproveReserved() {
     ],
   }));
 
-  // 🔧 FIX: always just go back one screen (to existing Scanner or Tickets)
   const goBackToTickets = () => {
     router.back();
   };
@@ -128,7 +127,6 @@ export default function ApproveReserved() {
     resetZoom();
   };
 
-  // 🔁 Re-fetch the ticket to get a reliable preview URL
   useEffect(() => {
     let cancelled = false;
 
