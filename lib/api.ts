@@ -94,13 +94,12 @@ export type ActiveSeasonSummary = {
 
 type OkItem<T> = { ok: true; item: T };
 
-// --- KEY CHANGE HERE: Using process.env ---
 function getBaseUrl(): string {
-  // 1. Try process.env (Standard for Expo 49+ with .env files)
+  // Standard Expo env check
   const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
   if (envUrl) return envUrl.replace(/\/+$/, "");
 
-  // 2. Fallback for safety (if somehow process.env fails but app.json still has it)
+  // Safety fallback if process.env fails
   const extraUrl =
     (Constants?.expoConfig?.extra as any)?.EXPO_PUBLIC_API_BASE_URL ||
     (Constants as any)?.manifest2?.extra?.EXPO_PUBLIC_API_BASE_URL;
@@ -113,12 +112,12 @@ function getBaseUrl(): string {
 }
 
 function getScannerKey(): string | null {
-  // 1. Try process.env
+  // Try env variable
   if (process.env.EXPO_PUBLIC_SCANNER_KEY) {
     return process.env.EXPO_PUBLIC_SCANNER_KEY;
   }
 
-  // 2. Fallback
+  // Fallback
   return (
     (Constants?.expoConfig?.extra as any)?.EXPO_PUBLIC_SCANNER_KEY ||
     (Constants as any)?.manifest2?.extra?.EXPO_PUBLIC_SCANNER_KEY ||

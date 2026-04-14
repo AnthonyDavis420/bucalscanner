@@ -718,7 +718,7 @@ export default function ConfirmTicket() {
         return;
       }
 
-      // --- CHILD REDEEM GUARD ---
+      // Child redeem guard
       if (
         nextStatus === "redeemed" &&
         isChildType &&
@@ -747,7 +747,7 @@ export default function ConfirmTicket() {
         }
       }
 
-      // --- PARENT INVALIDATION: NUKE ALL CHILDREN IF LAST ADULT GOES INVALID ---
+      // Parent invalidation logic
       if (
         nextStatus === "invalid" &&
         isParentType &&
@@ -877,7 +877,7 @@ export default function ConfirmTicket() {
       return;
     }
 
-    // PARENT REVERT LOGIC
+    // Parent revert logic
     if (hasBundleGroup && isParentType && eventIdEffective && seasonIdEffective) {
       try {
         setActionBusy(true);
@@ -892,13 +892,13 @@ export default function ConfirmTicket() {
           return tType === "child";
         });
 
-        // 1. Check if we are reviving from INVALID state
+        // Check if reviving from invalid state
         const allAdultsInvalidBefore = adults.every((a) => {
           const s = String((a as any).status || "").toLowerCase();
           return s === "invalid";
         });
 
-        // 2. Check if we are reverting from REDEEMED state
+        // Check if reverting from redeemed state
         const remainingRedeemedAdults = adults.filter(a => {
            const s = String((a as any).status || "").toLowerCase();
            return s === 'redeemed' && a.id !== ticket.id; 

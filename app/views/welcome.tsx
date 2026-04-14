@@ -36,7 +36,7 @@ export default function Welcome() {
   const [counts, setCounts] = useState({ tickets: 0, vouchers: 0 });
   const [loadingCounts, setLoadingCounts] = useState(true);
 
-  // --- CHANGED: Use useFocusEffect instead of useEffect for BackHandler ---
+  // Handle hardware back button
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {

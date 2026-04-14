@@ -22,7 +22,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// --- Types ---
+// Types
 
 type TicketStatus = "active" | "pending" | "redeemed" | "invalid" | "expired";
 type TicketType = "adult" | "child" | "priority";
@@ -70,7 +70,7 @@ const STORAGE_KEYS = {
 
 const BLUE = "#071689";
 
-// --- Helpers ---
+// Helpers
 
 function asString(v: string | string[] | undefined, fallback = "") {
   if (Array.isArray(v)) return v[0] ?? fallback;
@@ -137,33 +137,32 @@ function mapTicketSummary(src: TicketSummary): Ticket {
   };
 }
 
-// --- Main Component ---
 
 export default function AllTickets() {
   const navigation = useNavigation();
   const params = useLocalSearchParams();
 
-  // --- Context ---
+  // Context
   const [eventId, setEventId] = useState(() => asString(params.eventId, ""));
   const [seasonId, setSeasonId] = useState(() => asString(params.seasonId, ""));
   const [eventName, setEventName] = useState(() => asString(params.eventName, "Event"));
 
-  // --- Data ---
+  // Data
   const [data, setData] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // --- Filters ---
+  // Filters
   const [q, setQ] = useState("");
   
   // Filter States
   const [activeDropdown, setActiveDropdown] = useState<"status" | "section" | "type" | null>(null);
   
   const [filterStatus, setFilterStatus] = useState<TicketStatus | "all">("all");
-  const [filterSectionSide, setFilterSectionSide] = useState<string>("all"); // Consolidated Filter
+  const [filterSectionSide, setFilterSectionSide] = useState<string>("all");
   const [filterPurchase, setFilterPurchase] = useState<PurchaseFilter>("all");
 
-  // --- UI ---
+  // UI
   const [expandedBundleId, setExpandedBundleId] = useState<string | null>(null);
   const [backBusy, setBackBusy] = useState(false);
   const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,7 +217,7 @@ export default function AllTickets() {
 
   useEffect(() => () => { if (backTimer.current) clearTimeout(backTimer.current); }, []);
 
-  // --- Derived Data: Consolidated Section/Side ---
+  // Derived Data: Consolidated Section/Side
   const availableSectionSides = useMemo(() => {
     const set = new Set<string>();
     data.forEach((t) => {
@@ -235,22 +234,22 @@ export default function AllTickets() {
     return Array.from(set).sort();
   }, [data]);
 
-  // --- Filtering Logic ---
+  // Filtering Logic
   const filteredTickets = useMemo(() => {
     let out = data;
 
-    // 1. Search
+    // Search filter
     if (q.trim()) {
       const s = q.trim().toLowerCase();
       out = out.filter(t => t.code.toLowerCase().includes(s) || t.holderName.toLowerCase().includes(s));
     }
 
-    // 2. Status
+    // Status filter
     if (filterStatus !== "all") {
       out = out.filter(t => t.status === filterStatus);
     }
 
-    // 3. Consolidated Section - Side
+    // Section - Side filter
     if (filterSectionSide !== "all") {
       out = out.filter(t => {
         const section = t.sectionName ? t.sectionName.trim() : "";
@@ -265,7 +264,7 @@ export default function AllTickets() {
       });
     }
 
-    // 4. Purchase Type
+    // Purchase Type filter
     if (filterPurchase !== "all") {
       out = out.filter(t => {
         const type = (t.purchaseType || "").toLowerCase().trim();
@@ -281,7 +280,7 @@ export default function AllTickets() {
     });
   }, [data, q, filterStatus, filterSectionSide, filterPurchase]);
 
-  // --- Grouping Logic ---
+  // Grouping Logic
   const rows: TicketRow[] = useMemo(() => {
     const groups = new Map<string, Ticket[]>();
     for (const t of filteredTickets) {
@@ -392,7 +391,7 @@ export default function AllTickets() {
     setExpandedBundleId((prev) => (prev === bundleId ? null : bundleId));
   };
 
-  // --- Renderers ---
+  // Renderers
 
   const renderItem = ({ item }: { item: TicketRow }) => {
     if (item.kind === "single") {
@@ -529,7 +528,7 @@ export default function AllTickets() {
   );
 }
 
-// --- Components ---
+// Components
 function FilterDropdownButton({ label, active, onPress }: { label: string, active: boolean, onPress: () => void }) {
     return (
         <Pressable onPress={onPress} style={[styles.dropdownBtn, active && styles.dropdownBtnActive]}>

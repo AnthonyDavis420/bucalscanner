@@ -82,7 +82,7 @@ export default function CreateTicket() {
 
   const [imgViewerVisible, setImgViewerVisible] = useState(false);
 
-  // 🔍 Shared values for pinch & pan (map image)
+  // Map zoom states
   const mapScale = useSharedValue(1);
   const mapSavedScale = useSharedValue(1);
   const mapTranslateX = useSharedValue(0);
@@ -349,7 +349,7 @@ export default function CreateTicket() {
       : "https://via.placeholder.com/700x300.png?text=Seating+Map";
   }, [event]);
 
-  // 🌀 Gesture definitions for map zoom modal
+  // Map gestures
   const mapPinch = Gesture.Pinch()
     .onStart(() => {
       mapSavedScale.value = mapScale.value;
@@ -391,7 +391,6 @@ export default function CreateTicket() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <SafeAreaView style={styles.safe}>
-        {/* WRAPPER ADDED HERE */}
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={{ flex: 1 }}
@@ -413,7 +412,6 @@ export default function CreateTicket() {
               <View style={{ width: 22 }} />
             </View>
 
-            {/* Preview box styled like confirmVoucher */}
             <View style={styles.ticketBox}>
               <Pressable
                 style={styles.ticketPressable}
@@ -436,11 +434,9 @@ export default function CreateTicket() {
               <Text style={styles.ticketTapHint}>Tap seating map to zoom</Text>
             </View>
 
-            {/* FIX: Added zIndex: 100 here so this container sits on top of the next card */}
             <View style={[styles.ticketCountCard, { zIndex: 100 }]}>
               <Text style={styles.ticketCountTitle}>Number of Tickets</Text>
               
-              {/* FIX: Added zIndex: 100 here so the row is elevated */}
               <View style={[styles.ticketCountRow, { zIndex: 100 }]}>
                 <View style={styles.ticketCountItem}>
                   <Text style={styles.ticketCountLabel}>Adults</Text>
@@ -450,7 +446,6 @@ export default function CreateTicket() {
                   </View>
                 </View>
 
-                {/* FIX: Added zIndex: 100 here so this specific item (Children) overlaps others */}
                 <View style={[styles.ticketCountItem, { zIndex: 100 }]}>
                   <Text style={styles.ticketCountLabel}>Children</Text>
                   <Pressable
@@ -521,7 +516,6 @@ export default function CreateTicket() {
               </View>
             )}
 
-            {/* This card is naturally below, so we keep default zIndex (0 or 1) */}
             <View style={[styles.ticketCard, { zIndex: 1 }]}>
               {!current ? (
                 <Text>No tickets selected.</Text>
@@ -787,7 +781,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: "800", color: "#071689" },
   headerSubtitle: { fontSize: 13, color: "#4B5563" },
 
-  // 🔹 Preview box styled like confirmVoucher ticketBox
   ticketBox: {
     width: "100%",
     borderRadius: 12,

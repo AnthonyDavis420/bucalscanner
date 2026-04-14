@@ -22,7 +22,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scannerApi, type VoucherSummary } from "../../lib/api";
 
-// --- Types ---
+// Types
 
 type VoucherStatus = "active" | "redeemed" | "expired";
 
@@ -49,7 +49,7 @@ const STORAGE_KEYS = {
 
 const BLUE = "#071689";
 
-// --- Helpers ---
+// Helpers
 
 function asString(v: string | string[] | undefined, fallback = "") {
   if (Array.isArray(v)) return v[0] ?? fallback;
@@ -155,7 +155,6 @@ function mapVoucherSummary(src: VoucherSummary): Voucher {
   };
 }
 
-// --- Main Component ---
 
 export default function AllVouchers() {
   const navigation = useNavigation();
@@ -165,17 +164,17 @@ export default function AllVouchers() {
     eventName?: string | string[];
   }>();
 
-  // --- Context State ---
+  // Context
   const [eventId, setEventId] = useState(() => asString(params.eventId, ""));
   const [seasonId, setSeasonId] = useState(() => asString(params.seasonId, ""));
   const [eventName, setEventName] = useState(() => asString(params.eventName, "Event"));
 
-  // --- Data State ---
+  // Data states
   const [data, setData] = useState<Voucher[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // --- Filter State ---
+  // Filter states
   const [q, setQ] = useState("");
   const [activeDropdown, setActiveDropdown] = useState<"status" | "section" | null>(null);
   const [statusFilter, setStatusFilter] = useState<VoucherStatus | "all">("all");
@@ -184,7 +183,6 @@ export default function AllVouchers() {
   const [backBusy, setBackBusy] = useState(false);
   const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // --- Load Context ---
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -207,7 +205,6 @@ export default function AllVouchers() {
     return () => { cancelled = true; };
   }, []);
 
-  // --- Load Data ---
   const loadVouchers = useCallback(() => {
     let cancelled = false;
     if (!eventId || !seasonId) {
@@ -236,7 +233,6 @@ export default function AllVouchers() {
 
   useEffect(() => () => { if (backTimer.current) clearTimeout(backTimer.current); }, []);
 
-  // --- Derived Data: Sections ---
   const availableSectionSides = useMemo(() => {
     const set = new Set<string>();
     data.forEach((t) => {
@@ -251,11 +247,11 @@ export default function AllVouchers() {
     return Array.from(set).sort();
   }, [data]);
 
-  // --- Filtering ---
+  // Filtering Logic
   const filtered = useMemo(() => {
     let out = data;
 
-    // 1. Search
+    // Search filter
     if (q.trim()) {
       const s = q.trim().toLowerCase();
       out = out.filter(v =>
@@ -266,12 +262,12 @@ export default function AllVouchers() {
       );
     }
 
-    // 2. Status
+    // Status filter
     if (statusFilter !== "all") {
       out = out.filter(v => v.status === statusFilter);
     }
 
-    // 3. Section
+    // Section filter
     if (filterSectionSide !== "all") {
       out = out.filter(v => {
         const section = v.sectionName ? v.sectionName.trim() : "";
@@ -287,7 +283,7 @@ export default function AllVouchers() {
     return out;
   }, [data, q, statusFilter, filterSectionSide]);
 
-  // --- Handlers ---
+  // Event Handlers
   const onSearch = () => setQ(q.trim());
   const toggleDropdown = (key: "status" | "section") => setActiveDropdown(prev => prev === key ? null : key);
 
@@ -427,7 +423,7 @@ export default function AllVouchers() {
   );
 }
 
-// --- Components ---
+// UI Components
 
 function FilterDropdownButton({ label, active, onPress }: { label: string, active: boolean, onPress: () => void }) {
     return (
